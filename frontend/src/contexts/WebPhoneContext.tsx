@@ -42,6 +42,9 @@ export interface WebPhoneContextValue {
   unlockRemoteAudio: () => void;
   /** Live WebRTC media quality for the active call (null when no inbound audio yet). */
   callStats: CallStats | null;
+  /** Auto-answer incoming calls after 1 second. Stored in localStorage per browser. */
+  autoAnswer: boolean;
+  setAutoAnswer: (on: boolean) => void;
 }
 
 const WebPhoneContext = createContext<WebPhoneContextValue | null>(null);
