@@ -10,6 +10,9 @@ import { fetchWithAuth } from '../auth';
 // which left the audio element un-primed and the dialing/ringback tone silent.
 const SILENT_WAV = 'data:audio/wav;base64,UklGRogAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YWQAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA';
 
+const AUTO_ANSWER_STORAGE_KEY = 'softphone_auto_answer';
+const AUTO_ANSWER_DELAY_MS = 1000;
+
 export interface WebRtcConfig {
   server: string;
   extension: string | null;
@@ -36,11 +39,17 @@ export function useWebPhone() {
   const [lastDialedNumber, setLastDialedNumber] = useState<string>(
     () => localStorage.getItem('softphone_last_number') ?? ''
   );
+  const [autoAnswer, setAutoAnswerState] = useState(
+    () => localStorage.getItem(AUTO_ANSWER_STORAGE_KEY) === 'true',
+  );
   const phoneRef = useRef<WebPhone | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const dialingRef = useRef<HTMLAudioElement | null>(null);
   const hasActiveCallRef = useRef(false);
   const audioUnlockedRef = useRef(false);
+  const autoAnswerRef = useRef(autoAnswer);
+  const autoAnswerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unlockRemoteAudioRef = useRef<(() => void) | null>(null);
   // Tracks the current status synchronously so connect() can guard against
   // interrupting a SIP.js transport reconnect that's already in progress.
   const statusRef = useRef<WebPhoneStatus>('disconnected');
@@ -95,6 +104,20 @@ export function useWebPhone() {
   // Keep statusRef in sync so connect() can read the current status synchronously
   // without stale-closure issues (statusRef is updated before App.tsx effects run).
   useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { autoAnswerRef.current = autoAnswer; }, [autoAnswer]);
+
+  const setAutoAnswer = useCallback((on: boolean) => {
+    autoAnswerRef.current = on;
+    setAutoAnswerState(on);
+    localStorage.setItem(AUTO_ANSWER_STORAGE_KEY, on ? 'true' : 'false');
+  }, []);
+
+  const clearAutoAnswerTimer = useCallback(() => {
+    if (autoAnswerTimerRef.current !== null) {
+      clearTimeout(autoAnswerTimerRef.current);
+      autoAnswerTimerRef.current = null;
+    }
+  }, []);
 
   const addLog = useCallback((message: string, type: 'info' | 'success' | 'warn' | 'error') => {
     setLogs((prev) => [...prev.slice(-99), { message, type, time: new Date().toLocaleTimeString() }]);
@@ -131,6 +154,29 @@ export function useWebPhone() {
     onIncomingCall: (info) => {
       const seq = ++callSeqRef.current;
       resolvedNameRef.current = '';
+      let answered = false;
+
+      const acceptCall = () => {
+        if (answered) return;
+        answered = true;
+        clearAutoAnswerTimer();
+        unlockRemoteAudioRef.current?.();
+        setActiveCallRemoteNumber(info.callerNumber);
+        setActiveCallRemoteName(resolvedNameRef.current || info.callerName || '');
+        setIncomingCall(null);
+        const phone = phoneRef.current;
+        if (phone) phone.acceptIncomingCall((stream) => setRemoteStream(stream));
+      };
+
+      const rejectCall = () => {
+        if (answered) return;
+        answered = true;
+        clearAutoAnswerTimer();
+        setIncomingCall(null);
+        phoneRef.current?.rejectIncomingCall();
+        info.reject();
+      };
+
       // Resolve the caller's CRM name while ringing (one retry: the server may
       // still be fetching on a cold cache). Applies to the ringing screen and,
       // if the call was already answered, the in-call screen.
@@ -147,24 +193,28 @@ export function useWebPhone() {
           setActiveCallRemoteName(name);
         }
       })();
+
       setIncomingCall({
         callerNumber: info.callerNumber,
         callerName: info.callerName,
-        accept: () => {
-          setActiveCallRemoteNumber(info.callerNumber);
-          setActiveCallRemoteName(resolvedNameRef.current || info.callerName || '');
-          setIncomingCall(null);
-          const phone = phoneRef.current;
-          if (phone) phone.acceptIncomingCall((stream) => setRemoteStream(stream));
-        },
-        reject: () => {
-          setIncomingCall(null);
-          phoneRef.current?.rejectIncomingCall();
-          info.reject();
-        },
+        accept: acceptCall,
+        reject: rejectCall,
       });
+
+      if (autoAnswerRef.current) {
+        autoAnswerTimerRef.current = setTimeout(() => {
+          autoAnswerTimerRef.current = null;
+          if (autoAnswerRef.current && !answered) {
+            addLog('Auto answering incoming call', 'info');
+            acceptCall();
+          }
+        }, AUTO_ANSWER_DELAY_MS);
+      }
     },
-    onIncomingCallEnded: () => setIncomingCall(null),
+    onIncomingCallEnded: () => {
+      clearAutoAnswerTimer();
+      setIncomingCall(null);
+    },
   };
 
   const connect = useCallback(async () => {
@@ -205,6 +255,7 @@ export function useWebPhone() {
   }, [configLoading, configError, config, status, connect]);
 
   const disconnect = useCallback((reason: string = 'manual') => {
+    clearAutoAnswerTimer();
     if (phoneRef.current) {
       phoneRef.current.disconnect(reason);
       phoneRef.current = null;
@@ -214,7 +265,7 @@ export function useWebPhone() {
     setCallDuration('');
     setIncomingCall(null);
     setRemoteStream(null);
-  }, []);
+  }, [clearAutoAnswerTimer]);
 
   const makeCall = useCallback(() => {
     const phone = phoneRef.current;
@@ -312,6 +363,7 @@ export function useWebPhone() {
         audio.removeAttribute('src');
       });
   }, []);
+  unlockRemoteAudioRef.current = unlockRemoteAudio;
 
   useEffect(() => {
     if (remoteStream && remoteAudioRef.current) {
@@ -350,11 +402,12 @@ export function useWebPhone() {
 
   useEffect(() => {
     return () => {
+      clearAutoAnswerTimer();
       phoneRef.current?.disconnect('hook-unmount');
       phoneRef.current = null;
       dialingRef.current?.pause();
     };
-  }, []);
+  }, [clearAutoAnswerTimer]);
 
   const canConnect =
     !configLoading &&
@@ -450,5 +503,7 @@ export function useWebPhone() {
     toggleHold,
     unlockRemoteAudio,
     callStats,
+    autoAnswer,
+    setAutoAnswer,
   };
 }
