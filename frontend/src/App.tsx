@@ -214,7 +214,7 @@ function App({ onLogout }: AppProps) {
     mq.addEventListener('change', onChange);
     return () => mq.removeEventListener('change', onChange);
   }, []);
-  const [dateRange, setDateRange] = useState<DateRange>(() => quickRanges()['30d']);
+  const [dateRange, setDateRange] = useState<DateRange>(() => quickRanges()['today']);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [teamExpanded, setTeamExpanded] = useState(true);
   const [settingsExpanded, setSettingsExpanded] = useState(() => activeTab === 'settings');
@@ -478,7 +478,7 @@ function App({ onLogout }: AppProps) {
     }
     // Admin-only tabs. Without this a supervisor navigating to /logs gets a blank
     // <main> rather than being sent somewhere useful.
-    if (userRole !== 'admin' && ['logs', 'groups', 'users'].includes(activeTab)) {
+    if (userRole !== 'admin' && ['logs', 'groups', 'users', 'settings'].includes(activeTab)) {
       navigate(`/${DEFAULT_TAB}`, { replace: true });
     }
   }, [userRole, activeTab, navigate]);
@@ -856,10 +856,9 @@ function App({ onLogout }: AppProps) {
               </>
             )}
 
-            {/* Settings — admin and supervisor. Collapsible dropdown of sub-tabs (echo-style). */}
-            {(getUser()?.role === 'admin' || getUser()?.role === 'supervisor') && (
+            {/* Settings — admin only. Collapsible dropdown of sub-tabs (echo-style). */}
+            {getUser()?.role === 'admin' && (
               <>
-                {getUser()?.role === 'supervisor' && <div className="sidebar-divider" />}
                 {sidebarCollapsed ? (
                   <button
                     className={`sidebar-item${activeTab === 'settings' ? ' active' : ''}`}
@@ -1020,7 +1019,7 @@ function App({ onLogout }: AppProps) {
             />
           )}
           {activeTab === 'logs' && getUser()?.role === 'admin' && <LogsPanel />}
-          {activeTab === 'settings' && (getUser()?.role === 'admin' || getUser()?.role === 'supervisor') && <SettingsPanel tab={settingsSubTab as SettingsTab} onTabChange={selectSettingsTab} />}
+          {activeTab === 'settings' && getUser()?.role === 'admin' && <SettingsPanel tab={settingsSubTab as SettingsTab} onTabChange={selectSettingsTab} />}
         </main>
       </div>
 
