@@ -3,11 +3,12 @@ import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   ChevronDown, Play, CheckCircle2, RefreshCw, MinusCircle, CircleDot,
-  Pause, PhoneCall, Headset, HeadphoneOff, LogOut,
+  Pause, PhoneCall, Headset, HeadphoneOff, LogOut, Phone, PhoneIncoming,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { fetchWithAuth, getUser } from '../auth';
 import type { AgentPresence } from './AgentStatusBar';
+import { useWebPhoneContext } from '../contexts/WebPhoneContext';
 
 interface PauseReason {
   id: number;
@@ -25,8 +26,8 @@ interface PauseReason {
  * single state-tinted band: a state-icon chip + label (+ count-up timer while in
  * queue) that opens a menu of the transitions valid for the current state (Go
  * Ready / Not-Ready reasons / Do Not Disturb / Log out), plus two always-on
- * switches — a **DND toggle** and a **queue login/logout** headset toggle — and a
- * registration-signal glyph. State is live from the WebSocket (the `presence`
+ * switches — a **DND toggle**, a **queue login/logout** headset toggle, an **auto
+ * answer** toggle, and a registration-signal glyph. State is live from the WebSocket (the `presence`
  * prop, derived in App.tsx); actions POST to the REST endpoints and the socket
  * broadcast flips the band back.
  *
@@ -82,6 +83,7 @@ interface Props {
 
 export function AgentStatusHeader({ title, icon, isConnected, presence, onCall, onRefresh, refreshDisabled }: Props) {
   const { t } = useTranslation();
+  const { autoAnswer, setAutoAnswer } = useWebPhoneContext();
   const user = getUser();
   const [reasons, setReasons] = useState<PauseReason[]>([]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -241,6 +243,22 @@ export function AgentStatusHeader({ title, icon, isConnected, presence, onCall, 
         >
           <span className="agent-queue-toggle-track">
             <span className="agent-queue-toggle-knob">{queueOn ? <Headset size={12} /> : <HeadphoneOff size={12} />}</span>
+          </span>
+        </button>
+
+        {/* Auto Answer toggle — local preference, answers after 1s when enabled */}
+        <button
+          type="button" role="switch" aria-checked={autoAnswer}
+          className={`agent-aa-toggle${autoAnswer ? ' on' : ''}`}
+          style={{ ['--aa-color' as string]: autoAnswer ? 'var(--accent-primary)' : 'var(--status-unavailable)' }}
+          onClick={() => setAutoAnswer(!autoAnswer)}
+          title={autoAnswer ? t('agent.autoAnswerOff', 'Turn off auto answer') : t('agent.autoAnswer', 'Auto Answer')}
+          aria-label={t('agent.autoAnswer', 'Auto Answer')}
+        >
+          <span className="agent-aa-toggle-track">
+            <span className="agent-aa-toggle-knob">
+              {autoAnswer ? <PhoneIncoming size={12} /> : <Phone size={12} />}
+            </span>
           </span>
         </button>
 
