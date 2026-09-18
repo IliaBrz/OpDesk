@@ -1125,6 +1125,59 @@ async def lifespan(app: FastAPI):
 
     # Create AMI monitor with CRM connector + call-data sync config
     monitor = AMIExtensionsMonitor(crm_connector=crm_connector, crm_sync_config=load_crm_sync_config())
+    monitor.running = True
+
+    extensions = get_extensions_from_db()
+    if extensions:
+        monitor.monitored = set(str(e) for e in extensions)
+        log.info(f"Monitoring {len(extensions)} extensions")
+
+    def _on_call_notification_new(ext: str):
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(manager.broadcast({"type": "call_notification_new", "extension": ext}))
+            loop.create_task(_dispatch_missed_call_push(ext))
+        except RuntimeError:
+            pass
+    monitor.set_call_notification_callback(_on_call_notification_new)
+    monitor.set_raw_event_sink(ami_event_buffer.add)
+
+    def _on_incoming_call(ext: str, caller: str, call_id: str, display_name: str):
+        try:
+            loop = asyncio.get_running_loop()
+            if contact_resolver is not None:
+                contact_resolver.resolve_cached(caller, monitor.monitored if monitor else None)
+            wake_time = _pre_woken.pop(ext, 0.0)
+            if loop.time() - wake_time < _PRE_WAKE_TTL:
+                return
+            loop.create_task(push_service.send_call_wake(ext, caller, call_id, display_name))
+        except RuntimeError:
+            pass
+    monitor.set_incoming_call_callback(_on_incoming_call)
+
+    _analytics_loop_started = False
+
+    async def _on_ami_session_restored():
+        global bridge, presence
+        nonlocal _analytics_loop_started
+        if bridge is None:
+            bridge = AMIEventBridge(manager, monitor)
+            await bridge.start()
+            presence = PresenceRecorder(monitor)
+            monitor.register_event_callback(presence.handle_ami_event)
+            if not _analytics_loop_started:
+                asyncio.create_task(analytics_module.start_aggregation_loop())
+                _analytics_loop_started = True
+        if presence:
+            try:
+                await presence.hydrate()
+            except Exception as e:
+                log.warning(f"Agent presence hydrate failed: {e}")
+        if bridge:
+            await bridge.broadcast_state_now()
+        log_startup_summary(monitor)
+
+    monitor.register_reconnect_callback(_on_ami_session_restored)
 
     # Retry loop — needed when SIP TLS startup restarts Asterisk right before we connect
     _ami_connected = False
@@ -1137,81 +1190,12 @@ async def lifespan(app: FastAPI):
 
     if _ami_connected:
         log.info("Connected to AMI")
-        
-        # Load extensions
-        extensions = get_extensions_from_db()
-        if extensions:
-            monitor.monitored = set(str(e) for e in extensions)
-            log.info(f"Monitoring {len(extensions)} extensions")
-        
-        # Initial sync (BEFORE starting event reader to avoid concurrent reads)
-        # This gets the current state of all calls, extensions and queues
-        await monitor.sync_extension_statuses()
-        await monitor.sync_active_calls()
-        await monitor.sync_queue_status()
-        await monitor.sync_dnd_state()
-        
-        # 🚀 Log startup summary (data goes to React via WebSocket)
-        log_startup_summary(monitor)
-        
-        # Enable event monitoring (after syncs complete)
-        await monitor._send_async('Events', {'EventMask': 'on'})
-        monitor.running = True
-        monitor._event_task = asyncio.create_task(monitor._read_events_async())
-
-        def _on_call_notification_new(ext: str):
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(manager.broadcast({"type": "call_notification_new", "extension": ext}))
-                loop.create_task(_dispatch_missed_call_push(ext))
-            except RuntimeError:
-                pass
-        monitor.set_call_notification_callback(_on_call_notification_new)
-
-        # Feed the System Logs panel. The buffer is disabled by default, so until an
-        # admin turns it on this costs one attribute read per AMI event.
-        monitor.set_raw_event_sink(ami_event_buffer.add)
-
-        def _on_incoming_call(ext: str, caller: str, call_id: str, display_name: str):
-            try:
-                loop = asyncio.get_running_loop()
-                # Warm the CRM contact cache at first ring so the name is usually
-                # resolved by the time the softphone asks for it. Runs before the
-                # pre-wake dedup below — that guard is about VoIP pushes only.
-                if contact_resolver is not None:
-                    contact_resolver.resolve_cached(caller, monitor.monitored if monitor else None)
-                # If a predial VoIP push was already sent for this extension, skip the
-                # second push.  Two VoIP pushes → two CallKit UUIDs → end-call event
-                # lands on the wrong UUID → no SIP BYE → caller stuck.
-                wake_time = _pre_woken.pop(ext, 0.0)
-                if loop.time() - wake_time < _PRE_WAKE_TTL:
-                    return
-                loop.create_task(push_service.send_call_wake(ext, caller, call_id, display_name))
-            except RuntimeError:
-                pass
-        monitor.set_incoming_call_callback(_on_incoming_call)
-
-        # Start event bridge
-        bridge = AMIEventBridge(manager, monitor)
-        await bridge.start()
-
-        # Agent presence recorder — writes agent_activity segments (Agent Adherence
-        # data source). Reconciles call flow + feature-code actions from AMI events,
-        # then hydrates from the live queue state so already-logged-in agents count.
-        presence = PresenceRecorder(monitor)
-        monitor.register_event_callback(presence.handle_ami_event)
-        try:
-            await presence.hydrate()
-        except Exception as e:
-            log.warning(f"Agent presence hydrate failed: {e}")
-
-        # Start analytics pre-aggregation background task
-        asyncio.create_task(analytics_module.start_aggregation_loop())
-
+        await monitor._restore_session()
         log.info("🎯 Server ready - tracking realtime AMI events")
     else:
-        log.error("Failed to connect to AMI")
-    
+        log.error("Failed to connect to AMI — reconnect loop will keep trying")
+
+    monitor.start_reconnect_loop()
     yield
     
     # Shutdown
