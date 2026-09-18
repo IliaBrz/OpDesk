@@ -1485,6 +1485,12 @@ body::before {
   width: 100%;
 }
 
+/* Page shells (Call History, Analytics, Logs) fill the viewport; scroll lives inside. */
+.main-content > .ui-page {
+  flex: 1;
+  min-height: 0;
+}
+
 /* Tabs - Modern segmented control */
 .tabs {
   display: flex;
@@ -3601,6 +3607,16 @@ select.an-filter-select option:checked {
 /* Table wrapper */
 .cl-table-wrap {
   overflow-x: auto;
+}
+
+.ui-page-body > .cl-table-wrap {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.ui-page-body > .cl-pagination {
+  flex-shrink: 0;
 }
 
 /* Loading / Error / Empty states */
@@ -6846,9 +6862,10 @@ select.an-filter-select option:checked {
   gap: 8px;
   flex: 0 0 auto;
 }
-/* DND + queue toggle switches share geometry; each follows its own --dt/--qt colour. */
+/* DND + queue + auto-answer toggle switches share geometry; each follows its own colour token. */
 .agent-dnd-toggle,
-.agent-queue-toggle {
+.agent-queue-toggle,
+.agent-aa-toggle {
   display: inline-flex;
   align-items: center;
   padding: 0;
@@ -6858,9 +6875,11 @@ select.an-filter-select option:checked {
   flex: 0 0 auto;
 }
 .agent-dnd-toggle:disabled,
-.agent-queue-toggle:disabled { opacity: 0.55; cursor: default; }
+.agent-queue-toggle:disabled,
+.agent-aa-toggle:disabled { opacity: 0.55; cursor: default; }
 .agent-dnd-toggle-track,
-.agent-queue-toggle-track {
+.agent-queue-toggle-track,
+.agent-aa-toggle-track {
   position: relative;
   width: 44px;
   height: 22px;
@@ -6875,8 +6894,13 @@ select.an-filter-select option:checked {
   background: color-mix(in srgb, var(--qt-color, var(--status-unavailable)) 20%, transparent);
   border: 1px solid color-mix(in srgb, var(--qt-color, var(--status-unavailable)) 55%, transparent);
 }
+.agent-aa-toggle-track {
+  background: color-mix(in srgb, var(--aa-color, var(--status-unavailable)) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--aa-color, var(--status-unavailable)) 55%, transparent);
+}
 .agent-dnd-toggle-knob,
-.agent-queue-toggle-knob {
+.agent-queue-toggle-knob,
+.agent-aa-toggle-knob {
   position: absolute;
   top: 50%;
   inset-inline-start: 2px;
@@ -6892,8 +6916,10 @@ select.an-filter-select option:checked {
 }
 .agent-dnd-toggle-knob { background: var(--dt-color, var(--status-unavailable)); }
 .agent-queue-toggle-knob { background: var(--qt-color, var(--status-unavailable)); }
+.agent-aa-toggle-knob { background: var(--aa-color, var(--status-unavailable)); }
 .agent-dnd-toggle.on .agent-dnd-toggle-knob,
-.agent-queue-toggle.on .agent-queue-toggle-knob { inset-inline-start: 24px; }
+.agent-queue-toggle.on .agent-queue-toggle-knob,
+.agent-aa-toggle.on .agent-aa-toggle-knob { inset-inline-start: 24px; }
 /* Registration signal glyph — green bars when registered, red slashed when not. */
 .agent-header-reg { display: inline-flex; align-items: center; flex: 0 0 auto; color: var(--status-unavailable); }
 .agent-header-reg.on { color: var(--status-idle); }
