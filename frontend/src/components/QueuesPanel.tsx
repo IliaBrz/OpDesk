@@ -156,6 +156,25 @@ function memberStatusLabel(
   return t('queues.memberReady', { defaultValue: 'Ready' });
 }
 
+/** Display order within a queue: In Call → Ready → Not Ready → Unavailable. */
+function memberStatusSortRank(member: QueueMember): number {
+  const cls = memberStatusClass(member);
+  if (cls === 'busy') return 0;
+  if (cls === 'paused') return 2;
+  if (cls === 'unavailable') return 3;
+  return 1; // Ready
+}
+
+function sortQueueMembers(list: QueueMember[]): QueueMember[] {
+  return [...list].sort((a, b) => {
+    const byStatus = memberStatusSortRank(a) - memberStatusSortRank(b);
+    if (byStatus !== 0) return byStatus;
+    const nameA = (a.membername || a.interface).toLowerCase();
+    const nameB = (b.membername || b.interface).toLowerCase();
+    return nameA.localeCompare(nameB);
+  });
+}
+
 export function QueuesPanel({ queues, members, entries, extensions, sendAction, onSync }: QueuesPanelProps) {
   const { t } = useTranslation();
   const [showAddMember, setShowAddMember] = useState<string | null>(null);
@@ -254,13 +273,16 @@ export function QueuesPanel({ queues, members, entries, extensions, sendAction, 
     entriesByQueue[entry.queue].push(entry);
   });
 
-  // Group members by queue
+  // Group members by queue, sorted In Call → Ready → Not Ready → Unavailable
   const membersByQueue: Record<string, QueueMember[]> = {};
   Object.values(members).forEach(member => {
     if (!membersByQueue[member.queue]) {
       membersByQueue[member.queue] = [];
     }
     membersByQueue[member.queue].push(member);
+  });
+  Object.keys(membersByQueue).forEach((q) => {
+    membersByQueue[q] = sortQueueMembers(membersByQueue[q]);
   });
 
   // Bare extension number for a member interface, e.g. "PJSIP/100" -> "100".
