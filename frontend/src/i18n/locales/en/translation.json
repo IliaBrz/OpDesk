@@ -734,6 +734,19 @@
     }
   },
   "agent": {
+    "dnd": "Do Not Disturb",
+    "dndOff": "Turn off DND",
+    "login": "Log in to queues",
+    "logout": "Log out of queues",
+    "ready": "Ready",
+    "notReady": "Not Ready",
+    "idle": "Idle",
+    "onCall": "On call",
+    "goReady": "Ready",
+    "noReasons": "No reason codes",
+    "break": "break",
+    "autoAnswer": "Auto Answer",
+    "autoAnswerOff": "Turn off auto answer",
     "adherence": {
       "title": "Agent Adherence",
       "subtitle": "Login, ready, on-call and break time per agent for the selected period.",
