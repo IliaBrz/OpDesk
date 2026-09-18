@@ -95,6 +95,8 @@ __all__ = [
 AMI_RESPONSE_END = '\r\n\r\n'
 AMI_TIMEOUT      = 5.0
 EVENT_TIMEOUT    = 1.0
+RECONNECT_INITIAL_DELAY = 3.0
+RECONNECT_MAX_DELAY     = 60.0
 DIALPLAN_CTX     = {'s','h','i','t','o','a','e','start','hangup','invalid','timeout'}
 DIALED_VARS      = {'EXTEN','DIALEDPEERNUMBER','DIALEDNUMBER','OUTNUM',
                     'DIAL_NUMBER','CALLEDNUM','FROM_DID'}
@@ -213,6 +215,9 @@ class AMIExtensionsMonitor:
         self.connected = False
         self.running   = False
         self._event_task: Optional[asyncio.Task] = None
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._reconnect_lock: asyncio.Lock = asyncio.Lock()
+        self._reconnect_callbacks: List[Callable[[], Awaitable[None]]] = []
         self._read_buffer: str = ""  # Buffer for partial messages
         self._read_lock: asyncio.Lock = asyncio.Lock()  # Prevent concurrent reads
 
@@ -249,6 +254,9 @@ class AMIExtensionsMonitor:
     # ------------------------------------------------------------------
     async def connect(self) -> bool:
         """Async connection to AMI server."""
+        if self.connected:
+            return True
+        await self._close_transport(logoff=False)
         try:
             self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
             self.connected = True
@@ -273,39 +281,132 @@ class AMIExtensionsMonitor:
             log.error("Auth failed: %s", resp)
         except Exception as e:
             log.error("Connection error: %s", e)
-        self.connected = False
+        await self._close_transport(logoff=False)
         return False
 
-    async def disconnect(self):
-        """Async disconnect from AMI server."""
-        self.running = False
-        
-        # Cancel event reading task
-        if self._event_task and not self._event_task.done():
-            self._event_task.cancel()
-            try:
-                await self._event_task
-            except asyncio.CancelledError:
-                pass
-        
-        if self.connected and self.writer:
+    async def _close_transport(self, *, logoff: bool = False):
+        """Close the AMI socket without stopping the monitor."""
+        if logoff and self.connected and self.writer:
             try:
                 self.writer.write(b"Action: Logoff\r\n\r\n")
                 await self.writer.drain()
                 await asyncio.sleep(0.3)
             except Exception:
                 pass
-        
         if self.writer:
             try:
                 self.writer.close()
                 await self.writer.wait_closed()
             except Exception:
                 pass
-        
-        self.connected = False
         self.reader = None
         self.writer = None
+        self.connected = False
+
+    async def _clear_live_state(self):
+        """Drop volatile AMI-derived state so clients don't see stale calls."""
+        self.active_calls.clear()
+        self.ch2ext.clear()
+        self.ch_callerid.clear()
+        self.destch2ext.clear()
+        self.ch2uniqueid.clear()
+        self.ch2linkedid.clear()
+        self.linkedid2channels.clear()
+        self.queue_entries.clear()
+        self.queues.clear()
+        self.queue_members.clear()
+
+    def register_reconnect_callback(self, cb: Callable[[], Awaitable[None]]):
+        """Register a callback invoked after AMI reconnects and state is re-synced."""
+        self._reconnect_callbacks.append(cb)
+
+    def start_reconnect_loop(self):
+        """Start the background task that reconnects after AMI drops."""
+        if self._reconnect_task is None or self._reconnect_task.done():
+            self._reconnect_task = asyncio.create_task(self._reconnect_loop())
+
+    async def _handle_connection_lost(self, reason: str):
+        async with self._reconnect_lock:
+            if not self.running or not self.connected:
+                return
+            log.warning("AMI connection lost (%s)", reason)
+            self.connected = False
+            current = asyncio.current_task()
+            if self._event_task and not self._event_task.done() and self._event_task is not current:
+                self._event_task.cancel()
+                try:
+                    await self._event_task
+                except asyncio.CancelledError:
+                    pass
+                self._event_task = None
+            await self._close_transport(logoff=False)
+            self._clear_live_state()
+            self.start_reconnect_loop()
+
+    async def _restore_session(self):
+        """Re-enable events, sync state, restart the event reader, notify callbacks."""
+        await self._send_async('Events', {'EventMask': 'on'})
+        await self.sync_extension_statuses()
+        await self.sync_active_calls()
+        await self.sync_queue_status()
+        await self.sync_dnd_state()
+        if not self._event_task or self._event_task.done():
+            self._event_task = asyncio.create_task(self._read_events_async())
+        for cb in self._reconnect_callbacks:
+            try:
+                await cb()
+            except Exception as e:
+                log.warning("Reconnect callback failed: %s", e)
+
+    async def _reconnect_loop(self):
+        delay = RECONNECT_INITIAL_DELAY
+        while self.running:
+            if self.connected:
+                await asyncio.sleep(1.0)
+                continue
+            log.info("Attempting AMI reconnect to %s:%d...", self.host, self.port)
+            try:
+                if await self.connect():
+                    delay = RECONNECT_INITIAL_DELAY
+                    try:
+                        await self._restore_session()
+                        log.info("AMI reconnected successfully")
+                    except Exception as e:
+                        log.warning("Post-reconnect setup failed: %s", e)
+                        await self._close_transport(logoff=False)
+                        await asyncio.sleep(delay)
+                        delay = min(delay * 1.5, RECONNECT_MAX_DELAY)
+                else:
+                    log.warning("AMI reconnect failed — retry in %.0fs", delay)
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 1.5, RECONNECT_MAX_DELAY)
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                log.warning("AMI reconnect error: %s — retry in %.0fs", e, delay)
+                await asyncio.sleep(delay)
+                delay = min(delay * 1.5, RECONNECT_MAX_DELAY)
+
+    async def disconnect(self):
+        """Async disconnect from AMI server."""
+        self.running = False
+
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+            self._reconnect_task = None
+        
+        if self._event_task and not self._event_task.done():
+            self._event_task.cancel()
+            try:
+                await self._event_task
+            except asyncio.CancelledError:
+                pass
+
+        await self._close_transport(logoff=True)
 
     async def __aenter__(self):
         await self.connect()
@@ -377,9 +478,11 @@ class AMIExtensionsMonitor:
                 return await self._read_async_unlocked()
             except Exception as e:
                 log.error("Send %s failed: %s", action, e)
+                if self.running:
+                    asyncio.create_task(self._handle_connection_lost(str(e)))
                 return None
     
-    async def _send_action_with_events(self, action: str, params: Optional[Dict[str,str]] = None, 
+    async def _send_action_with_events(self, action: str, params: Optional[Dict[str,str]] = None,
                                         complete_event: str = None, timeout: float = 10.0) -> Optional[str]:
         """
         Send AMI action and read response including follow-up events.
@@ -433,6 +536,8 @@ class AMIExtensionsMonitor:
                         continue
                     
                     if not data:
+                        if self.running:
+                            asyncio.create_task(self._handle_connection_lost(f"{action}: socket closed"))
                         break
                     
                     decoded = data.decode('utf-8', errors='ignore')
@@ -447,6 +552,8 @@ class AMIExtensionsMonitor:
                 
             except Exception as e:
                 log.error("Send %s failed: %s", action, e)
+                if self.running:
+                    asyncio.create_task(self._handle_connection_lost(str(e)))
                 return None
     
     async def _read_events_async(self):
@@ -488,6 +595,9 @@ class AMIExtensionsMonitor:
                 if self.running:
                     log.error("Event read error: %s", e)
                 break
+
+        if self.running and self.connected:
+            await self._handle_connection_lost("event reader stopped")
 
     # ------------------------------------------------------------------
     # Call-info helpers
