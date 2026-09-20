@@ -8,9 +8,11 @@
     "en": "English",
     "ar": "Arabic",
     "es": "Spanish",
-    "pt": "Portuguese"
+    "pt": "Portuguese",
+    "ru": "Russian"
   },
   "nav": {
+    "dashboard": "Dashboard",
     "extensions": "Extensions",
     "activeCalls": "Active Calls",
     "queues": "Queues",
@@ -22,7 +24,10 @@
     "openMenu": "Open menu",
     "closeMenu": "Close menu",
     "logs": "Logs",
-    "contacts": "Contacts"
+    "contacts": "Contacts",
+    "team": "Team",
+    "expandSidebar": "Expand sidebar",
+    "collapseSidebar": "Collapse"
   },
   "header": {
     "softphoneRegistered": "Softphone (registered)",
@@ -215,6 +220,12 @@
     "direction": {
       "incoming": "Incoming",
       "outgoing": "Outgoing"
+    },
+    "callType": {
+      "IN": "Inbound",
+      "OUT": "Outbound",
+      "INTERNAL": "Internal",
+      "UNKNOWN": "Unknown"
     },
     "audioQuality": {
       "excellent": "EXCELLENT",

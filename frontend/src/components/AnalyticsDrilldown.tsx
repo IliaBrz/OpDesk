@@ -205,10 +205,11 @@ export function AnalyticsDrilldown({ dateRange }: Props) {
                     </td>
                     <td>
                       <span className={`cl-direction cl-direction-${(r.direction || '').toLowerCase()}`}>
-                        {r.direction === 'IN' ? '📥 IN' :
-                         r.direction === 'OUT' ? '📤 OUT' :
-                         r.direction === 'INTERNAL' ? '🔄 INT' :
-                         r.direction || '—'}
+                        {r.direction === 'IN' ? `📥 ${t('callLog.callType.IN')}` :
+                         r.direction === 'OUT' ? `📤 ${t('callLog.callType.OUT')}` :
+                         r.direction === 'INTERNAL' ? `🔄 ${t('callLog.callType.INTERNAL')}` :
+                         r.direction ? t(`callLog.callType.${r.direction}`, { defaultValue: r.direction }) :
+                         '—'}
                       </span>
                     </td>
                     <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.src}</td>

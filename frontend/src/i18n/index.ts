@@ -5,8 +5,9 @@ import en from './locales/en/translation.json';
 import ar from './locales/ar/translation.json';
 import es from './locales/es/translation.json';
 import pt from './locales/pt/translation.json';
+import ru from './locales/ru/translation.json';
 
-const SUPPORTED_LANGUAGES = ['en', 'ar', 'es', 'pt'] as const;
+const SUPPORTED_LANGUAGES = ['en', 'ar', 'es', 'pt', 'ru'] as const;
 const storedLang = localStorage.getItem('opdesk-lang');
 const savedLang = SUPPORTED_LANGUAGES.includes(storedLang as (typeof SUPPORTED_LANGUAGES)[number])
   ? storedLang!
@@ -20,6 +21,7 @@ i18n
       ar: { translation: ar },
       es: { translation: es },
       pt: { translation: pt },
+      ru: { translation: ru },
     },
     lng: savedLang,
     fallbackLng: 'en',

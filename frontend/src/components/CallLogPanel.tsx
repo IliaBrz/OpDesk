@@ -489,10 +489,11 @@ function CallJourneyModal({ call, journey, onClose }: CallJourneyModalProps) {
             </div>
             <div className="cl-journey-badges">
               <span className={`cl-journey-direction cl-direction-${(call.call_type || '').toLowerCase()}`}>
-                {call.call_type === 'IN' ? '📥 IN' :
-                 call.call_type === 'OUT' ? '📤 OUT' :
-                 call.call_type === 'INTERNAL' ? '🔄 INT' :
-                 call.call_type || '—'}
+                {call.call_type === 'IN' ? `📥 ${t('callLog.callType.IN')}` :
+                 call.call_type === 'OUT' ? `📤 ${t('callLog.callType.OUT')}` :
+                 call.call_type === 'INTERNAL' ? `🔄 ${t('callLog.callType.INTERNAL')}` :
+                 call.call_type ? t(`callLog.callType.${call.call_type}`, { defaultValue: call.call_type }) :
+                 '—'}
               </span>
               {call.extension && (
                 <span className="cl-journey-agent-badge">{t('callLog.journey.agent', { id: call.extension })}</span>
@@ -1014,10 +1015,11 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                         </span>
                       ) : (
                         <span className={`cl-direction cl-direction-${call.call_type?.toLowerCase()}`}>
-                          {call.call_type === 'IN' ? '📥 IN' :
-                           call.call_type === 'OUT' ? '📤 OUT' :
-                           call.call_type === 'INTERNAL' ? '🔄 INT' :
-                           call.call_type || '—'}
+                          {call.call_type === 'IN' ? `📥 ${t('callLog.callType.IN')}` :
+                           call.call_type === 'OUT' ? `📤 ${t('callLog.callType.OUT')}` :
+                           call.call_type === 'INTERNAL' ? `🔄 ${t('callLog.callType.INTERNAL')}` :
+                           call.call_type ? t(`callLog.callType.${call.call_type}`, { defaultValue: call.call_type }) :
+                           '—'}
                         </span>
                       )}
                     </td>
