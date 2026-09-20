@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { setLanguage } from './i18n';
+import { setLanguage, SUPPORTED_LANGUAGES } from './i18n';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useWebPhone } from './hooks/useWebPhone';
 import { WebPhoneProvider } from './contexts/WebPhoneContext';
@@ -65,7 +65,7 @@ import { quickRanges, type DateRange } from './components/analyticsUtils';
 import { raiseFor } from './lib/api';
 
 type TabType = 'dashboard' | 'extensions' | 'calls' | 'queues' | 'call-log' | 'contacts' | 'groups' | 'users' | 'analytics' | 'logs' | 'settings';
-const LANGUAGE_OPTIONS = ['en', 'ar', 'es', 'pt', 'ru'] as const;
+const LANGUAGE_OPTIONS = SUPPORTED_LANGUAGES;
 /** Kept in sync with the pre-paint theme script in index.html. */
 const THEME_KEY = 'opdesk:theme';
 

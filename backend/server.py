@@ -28,7 +28,7 @@ from fastapi.routing import APIRoute
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, HTMLResponse
 import uvicorn
 
 # HTTP contract layer (Rules 4 + 5). Handlers must use these rather than
@@ -66,8 +66,18 @@ from call_log import call_log as get_call_log, build_call_journey_from_cdr, CALL
 import analytics as analytics_module
 import push_service
 
-# Load environment variables
+# Load environment variables (backend/.env when started from backend/, or process env)
 load_dotenv()
+
+# UI locales the React frontend ships. Keep in sync with frontend/src/i18n/index.ts.
+SUPPORTED_UI_LOCALES = frozenset({"en", "ar", "es", "pt", "ru"})
+
+
+def get_default_locale() -> str:
+    """Default UI language from OPDESK_DEFAULT_LOCALE (.env). Falls back to en."""
+    raw = (os.getenv("OPDESK_DEFAULT_LOCALE") or "en").strip().lower()
+    base = raw.split("-", 1)[0].split("_", 1)[0]
+    return base if base in SUPPORTED_UI_LOCALES else "en"
 
 # Import CRM connector
 try:
@@ -1529,6 +1539,12 @@ async def auth_login(body: LoginBody, request: Request):
 async def auth_me(current_user: dict = Depends(get_current_user)):
     """Return current user with role, extension, and filter scope (requires valid token)."""
     return current_user
+
+
+@app.get("/api/ui/config")
+async def ui_config():
+    """Public UI bootstrap settings (default locale from .env). No auth required."""
+    return {"default_locale": get_default_locale()}
 
 
 @app.get("/api/webrtc/config")
@@ -4548,6 +4564,19 @@ frontend_path = os.path.abspath(frontend_path)
 if os.path.exists(frontend_path):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
 
+    def _spa_index_response() -> HTMLResponse:
+        """Serve index.html with OPDESK_DEFAULT_LOCALE injected for first paint."""
+        index_path = os.path.join(frontend_path, "index.html")
+        with open(index_path, encoding="utf-8") as f:
+            html = f.read()
+        if "__OPDESK_DEFAULT_LOCALE__" not in html:
+            snippet = (
+                f"<script>window.__OPDESK_DEFAULT_LOCALE__="
+                f"{json.dumps(get_default_locale())};</script>\n"
+            )
+            html = html.replace("</head>", snippet + "</head>", 1)
+        return HTMLResponse(html)
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend(full_path: str):
         """Serve the React SPA. Deep links (/call-log, /settings, …) all land here."""
@@ -4560,8 +4589,11 @@ if os.path.exists(frontend_path):
         if not resolved.startswith(os.path.realpath(frontend_path)):
             raise HTTPException(status_code=403, detail="Forbidden")
         if os.path.exists(resolved) and os.path.isfile(resolved):
+            # Never return the raw built index without the locale injection.
+            if os.path.basename(resolved) == "index.html":
+                return _spa_index_response()
             return FileResponse(resolved)
-        return FileResponse(os.path.join(frontend_path, "index.html"))
+        return _spa_index_response()
 
 
 # ---------------------------------------------------------------------------

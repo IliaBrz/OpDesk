@@ -5,7 +5,7 @@ import App from './App'
 import { Login } from './components/Login'
 import { getToken, removeToken } from './auth'
 import { rlog } from './lib/remoteLog'
-import './i18n'
+import { resolveInitialLanguage } from './i18n'
 import './styles/index.css'
 
 function Root() {
@@ -46,9 +46,11 @@ if ('serviceWorker' in navigator) {
   rlog('sw', 'serviceWorker not supported');
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <BrowserRouter>
-    <Root />
-  </BrowserRouter>
-)
+void resolveInitialLanguage().finally(() => {
+  ReactDOM.createRoot(document.getElementById('root')!).render(
+    <BrowserRouter>
+      <Root />
+    </BrowserRouter>
+  )
+})
 

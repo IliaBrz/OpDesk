@@ -1003,6 +1003,9 @@ PORT="${PORT:-$(_env_preserve PORT "8765")}"
 # Preserve AMI_CONTEXT — dialplan context for transfers (FreePBX/Issabel default: ext-local)
 AMI_CONTEXT=$(_env_preserve AMI_CONTEXT "ext-local")
 
+# Default UI language (en, ar, es, pt, ru)
+OPDESK_DEFAULT_LOCALE=$(_env_preserve OPDESK_DEFAULT_LOCALE "en")
+
 # Preserve push-notification vars (optional — absent vars simply disable push)
 FCM_PROJECT_ID=$(_env_preserve FCM_PROJECT_ID "")
 FCM_SERVICE_ACCOUNT_FILE=$(_env_preserve FCM_SERVICE_ACCOUNT_FILE "/opt/OpDesk/secrets/fcm-service-account.json")
@@ -1038,6 +1041,9 @@ JWT_SECRET=$JWT_SECRET
 OPDESK_BIND_HOST=127.0.0.1
 OPDESK_DOMAIN=$OPDESK_DOMAIN
 CORS_ALLOWED_ORIGINS=$CORS_ORIGINS
+
+# Default UI language for first-time visitors (en, ar, es, pt, ru)
+OPDESK_DEFAULT_LOCALE=$OPDESK_DEFAULT_LOCALE
 
 # IMPORTANT: these are the names server.py reads.
 # Leave empty when Nginx handles TLS termination (default); set paths to run backend with TLS directly.
