@@ -19,6 +19,13 @@ import type { InvitationAcceptOptions } from 'sip.js';
 import { rlog, remoteLogEnabled } from './remoteLog';
 import { computeCallStats, type CallStats } from './callStats';
 
+/**
+ * Keep only digits 0–9. Used for the dial field after Call and for the SIP
+ * INVITE Request-URI / To: user part (no +, spaces, dashes, etc.).
+ */
+export function digitsOnlyDial(number: string): string {
+  return (number || '').replace(/[^0-9]/g, '');
+}
 
 export type WebPhoneStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type CallStatus = '' | 'dialing' | 'ringing' | 'in_call' | 'incoming' | 'error';
@@ -535,7 +542,8 @@ export class WebPhone {
     number: string,
     onRemoteStream: (stream: MediaStream) => void
   ): Promise<void> {
-    if (!number?.trim()) {
+    const dial = digitsOnlyDial(number);
+    if (!dial) {
       this.log('Please enter a number', 'warn');
       return;
     }
@@ -563,11 +571,11 @@ export class WebPhone {
       return;
     }
 
-    this.setCallStatus(`Calling ${number}...`);
-    this.log(`Calling ${number}...`, 'info');
+    this.setCallStatus(`Calling ${dial}...`);
+    this.log(`Calling ${dial}...`, 'info');
 
     try {
-      const targetUri = UserAgent.makeURI(`sip:${number}@${this.domain}`);
+      const targetUri = UserAgent.makeURI(`sip:${dial}@${this.domain}`);
       if (!targetUri) throw new Error('Failed to create target URI');
 
       const inviterOptions: InviterOptions = {
@@ -606,7 +614,7 @@ export class WebPhone {
             break;
           case SessionState.Established:
             this.log('Call connected', 'success');
-            this.setCallStatus(`In call with ${number}`);
+            this.setCallStatus(`In call with ${dial}`);
             this.startCallTimer();
             this.setupRemoteMedia(inviter, onRemoteStream);
             if (this.localStream) this.callbacks.onLocalStream?.(this.localStream);

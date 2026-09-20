@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { WebPhone, type WebPhoneStatus, type WebPhoneCallbacks, type IncomingCallInfo } from '../lib/webPhone';
+import { WebPhone, digitsOnlyDial, type WebPhoneStatus, type WebPhoneCallbacks, type IncomingCallInfo } from '../lib/webPhone';
 import type { CallStats } from '../lib/callStats';
 import { fetchWithAuth } from '../auth';
 
@@ -37,7 +37,7 @@ export function useWebPhone() {
   const [callStats, setCallStats] = useState<CallStats | null>(null);
   const [dialNumber, setDialNumber] = useState('');
   const [lastDialedNumber, setLastDialedNumber] = useState<string>(
-    () => localStorage.getItem('softphone_last_number') ?? ''
+    () => digitsOnlyDial(localStorage.getItem('softphone_last_number') ?? '')
   );
   const [autoAnswer, setAutoAnswerState] = useState(
     () => localStorage.getItem(AUTO_ANSWER_STORAGE_KEY) === 'true',
@@ -270,8 +270,11 @@ export function useWebPhone() {
   const makeCall = useCallback(() => {
     const phone = phoneRef.current;
     if (!phone) return;
-    const target = dialNumber.trim() || lastDialedNumber;
+    const raw = dialNumber.trim() || lastDialedNumber;
+    const target = digitsOnlyDial(raw);
     if (!target) return;
+    // Reflect digit-only number in the dial field; INVITE To: uses the same value.
+    setDialNumber(target);
     if (target !== lastDialedNumber) {
       setLastDialedNumber(target);
       localStorage.setItem('softphone_last_number', target);
