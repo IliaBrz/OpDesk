@@ -3829,6 +3829,10 @@ async def get_call_log_endpoint(
     limit: int = 100, date: str = None,
     date_from: str = None, date_to: str = None,
     search: str = None,
+    src: str = None,
+    dest: str = None,
+    agent: str = None,
+    app: str = None,
     current_user: dict = Depends(require_scope("cdr:read")),
 ):
     """
@@ -3839,6 +3843,11 @@ async def get_call_log_endpoint(
         date: Filter by exact date in 'YYYY-MM-DD' format (optional)
         date_from: Filter from this date inclusive, 'YYYY-MM-DD' (optional)
         date_to: Filter up to this date inclusive, 'YYYY-MM-DD' (optional)
+        search: Match src OR dest OR uniqueid/linkedid (optional)
+        src: Filter by caller number (optional)
+        dest: Filter by destination number (optional)
+        agent: Filter by agent extension (optional)
+        app: Filter by app: queue | ivr | direct (optional)
 
     Performance note: on large CDR tables (100 K+ rows, e.g. MariaDB 5.5) a
     full-table scan is very slow.  When no date filter is supplied we default
@@ -3853,11 +3862,19 @@ async def get_call_log_endpoint(
 
         allowed_ext = None if current_user.get("role") == "admin" else (current_user.get("allowed_agent_extensions") or [])
         search_q = (search or "").strip() or None
+        src_q = (src or "").strip() or None
+        dest_q = (dest or "").strip() or None
+        agent_q = (agent or "").strip() or None
+        app_q = (app or "").strip().lower() or None
+        if app_q and app_q not in ("queue", "ivr", "direct"):
+            app_q = None
         data = get_call_log(limit=limit, date=date,
                             date_from=date_from, date_to=date_to,
-                            allowed_extensions=allowed_ext, search=search_q)
+                            allowed_extensions=allowed_ext, search=search_q,
+                            src=src_q, dest=dest_q, agent=agent_q, app=app_q)
         total = get_call_log_count_from_db(date=date, date_from=date_from, date_to=date_to,
-                                           allowed_extensions=allowed_ext, search=search_q)
+                                           allowed_extensions=allowed_ext, search=search_q,
+                                           src=src_q, dest=dest_q, agent=agent_q, app=app_q)
         return {"calls": data, "total": total}
     except Exception as e:
         log.error(f"Error fetching call log: {e}")

@@ -156,6 +156,9 @@
     "title": "Histórico de chamadas",
     "viewManage": "Visualize e gerencie registros de chamadas",
     "searchPlaceholder": "Pesquisar por origem ou destino...",
+    "filterSrcPlaceholder": "Origem…",
+    "filterDestPlaceholder": "Destino…",
+    "filterAgentPlaceholder": "Agente…",
     "sortOldest": "Ordenar: mais antigas primeiro",
     "sortNewest": "Ordenar: mais recentes primeiro",
     "sortOldestBtn": "Mais antigas primeiro",
@@ -216,6 +219,17 @@
     "direction": {
       "incoming": "Entrada",
       "outgoing": "Saída"
+    },
+    "callType": {
+      "IN": "Entrada",
+      "OUT": "Saída",
+      "INTERNAL": "Interna",
+      "UNKNOWN": "Desconhecido"
+    },
+    "app": {
+      "queue": "Fila",
+      "ivr": "IVR",
+      "direct": "Direta"
     },
     "audioQuality": {
       "excellent": "EXCELENTE",

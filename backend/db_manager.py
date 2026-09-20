@@ -420,7 +420,11 @@ def get_cdr_by_linkedid(linkedid):
 def get_call_log_from_db(limit: int = None, date: str = None,
                          date_from: str = None, date_to: str = None,
                          allowed_extensions: Optional[List[str]] = None,
-                         search: str = None) -> list:
+                         search: str = None,
+                         src: str = None,
+                         dest: str = None,
+                         agent: str = None,
+                         app: str = None) -> list:
     """
     Get call log data from the database.
     
@@ -430,6 +434,11 @@ def get_call_log_from_db(limit: int = None, date: str = None,
         date_from: Filter from this date inclusive, format 'YYYY-MM-DD' (optional)
         date_to: Filter up to this date inclusive, format 'YYYY-MM-DD' (optional)
         allowed_extensions: If set, only return calls where destination agent (from dstchannel) is in this list.
+        search: Free-text match on src OR dest OR uniqueid/linkedid (optional)
+        src: Filter by caller (first_leg.src) substring (optional)
+        dest: Filter by destination (first_leg.dst / last_leg.dst) substring (optional)
+        agent: Filter by agent extension on any CDR leg (optional)
+        app: Filter by call app: queue | ivr | direct (optional)
     
     Returns:
         List of CDR records as dictionaries
@@ -573,6 +582,40 @@ def get_call_log_from_db(limit: int = None, date: str = None,
             )
             params.extend([like, like, like, like, like])
 
+        # Differentiated column filters (AND with each other and with search).
+        if src:
+            like = f"%{src.strip()}%"
+            conditions.append("first_leg.src LIKE %s")
+            params.append(like)
+        if dest:
+            like = f"%{dest.strip()}%"
+            conditions.append("(first_leg.dst LIKE %s OR last_leg.dst LIKE %s)")
+            params.extend([like, like])
+        if agent:
+            ag = agent.strip()
+            conditions.append(
+                "first_leg.linkedid IN ("
+                "SELECT linkedid FROM cdr WHERE "
+                "SUBSTRING_INDEX(SUBSTRING_INDEX(dstchannel, '-', 1), '/', -1) = %s "
+                "OR SUBSTRING_INDEX(SUBSTRING_INDEX(channel, '-', 1), '/', -1) = %s "
+                "OR src = %s"
+                ")"
+            )
+            params.extend([ag, ag, ag])
+        if app:
+            app_l = app.strip().lower()
+            if app_l == 'queue':
+                conditions.append("first_leg.dcontext LIKE %s")
+                params.append('%queue%')
+            elif app_l == 'ivr':
+                conditions.append("first_leg.dcontext LIKE %s")
+                params.append('%ivr%')
+            elif app_l == 'direct':
+                conditions.append(
+                    "first_leg.dcontext NOT LIKE %s AND first_leg.dcontext NOT LIKE %s"
+                )
+                params.extend(['%queue%', '%ivr%'])
+
         if conditions:
             query += " WHERE " + " AND ".join(conditions)
         
@@ -603,7 +646,11 @@ def get_call_log_from_db(limit: int = None, date: str = None,
 def get_call_log_count_from_db(date: str = None,
                                 date_from: str = None, date_to: str = None,
                                 allowed_extensions: Optional[List[str]] = None,
-                                search: str = None) -> int:
+                                search: str = None,
+                                src: str = None,
+                                dest: str = None,
+                                agent: str = None,
+                                app: str = None) -> int:
     """
     Get total count of call log rows with the same filters as get_call_log_from_db
     (same JOIN/WHERE, no limit). Used so UI can show total calls beyond the fetch limit.
@@ -657,6 +704,36 @@ def get_call_log_count_from_db(date: str = None,
             like = f"%{search.strip()}%"
             conditions.append("(src LIKE %s OR dst LIKE %s OR uniqueid LIKE %s OR linkedid LIKE %s)")
             params.extend([like, like, like, like])
+
+        if src:
+            like = f"%{src.strip()}%"
+            conditions.append("src LIKE %s")
+            params.append(like)
+        if dest:
+            like = f"%{dest.strip()}%"
+            conditions.append("dst LIKE %s")
+            params.append(like)
+        if agent:
+            ag = agent.strip()
+            conditions.append(
+                "("
+                "SUBSTRING_INDEX(SUBSTRING_INDEX(dstchannel, '-', 1), '/', -1) = %s "
+                "OR SUBSTRING_INDEX(SUBSTRING_INDEX(channel, '-', 1), '/', -1) = %s "
+                "OR src = %s"
+                ")"
+            )
+            params.extend([ag, ag, ag])
+        if app:
+            app_l = app.strip().lower()
+            if app_l == 'queue':
+                conditions.append("dcontext LIKE %s")
+                params.append('%queue%')
+            elif app_l == 'ivr':
+                conditions.append("dcontext LIKE %s")
+                params.append('%ivr%')
+            elif app_l == 'direct':
+                conditions.append("dcontext NOT LIKE %s AND dcontext NOT LIKE %s")
+                params.extend(['%queue%', '%ivr%'])
 
         where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
         query = "SELECT COUNT(DISTINCT linkedid) AS cnt FROM cdr" + where_clause

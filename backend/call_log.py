@@ -369,7 +369,7 @@ def crm_identity_from_cdr(linkedid: str) -> dict:
 
 
 def call_log(limit=None, date=None, date_from=None, date_to=None, allowed_extensions=None,
-             search=None, enrich=True):
+             search=None, src=None, dest=None, agent=None, app=None, enrich=True):
     """Build normalized call-history rows from the CDR.
 
     enrich=True (Call History UI) resolves each row's recording path and flags
@@ -381,7 +381,8 @@ def call_log(limit=None, date=None, date_from=None, date_to=None, allowed_extens
     call_log = get_call_log_from_db(limit=limit, date=date,
                                      date_from=date_from, date_to=date_to,
                                      allowed_extensions=allowed_extensions,
-                                     search=search)
+                                     search=search, src=src, dest=dest,
+                                     agent=agent, app=app)
     
     result = []
     for cdr in call_log:

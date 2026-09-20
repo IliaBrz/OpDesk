@@ -703,8 +703,11 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Filters
+  // Filters — text fields (server-side) + selects (status/direction client-side; app server-side)
   const [searchQuery, setSearchQuery] = useState('');
+  const [srcFilter, setSrcFilter] = useState('');
+  const [destFilter, setDestFilter] = useState('');
+  const [agentFilter, setAgentFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [callTypeFilter, setCallTypeFilter] = useState('');
   const [appFilter, setAppFilter] = useState('');
@@ -726,9 +729,12 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
   const [vadLoadingUniqueid, setVadLoadingUniqueid] = useState<string | null>(null);
 
   // The 400ms debounce that used to live here is gone: ui/SearchInput owns the
-  // debounce now, so `searchQuery` is already the settled term. Re-adding a timer
-  // here would stack on top of it and double the delay before results move.
+  // debounce now, so committed filter values are already the settled terms.
   const search = searchQuery.trim();
+  const src = srcFilter.trim();
+  const dest = destFilter.trim();
+  const agent = agentFilter.trim();
+  const app = appFilter.trim();
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -740,6 +746,10 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
       params.set('date_from', dateRange.from);
       params.set('date_to', dateRange.to);
       if (search) params.set('search', search);
+      if (src) params.set('src', src);
+      if (dest) params.set('dest', dest);
+      if (agent) params.set('agent', agent);
+      if (app) params.set('app', app);
       const res = await fetch(`/api/call-log?${params.toString()}`, { headers: getAuthHeaders() });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
@@ -750,14 +760,19 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
     } finally {
       setLoading(false);
     }
-  }, [dateRange, search]);
+  }, [dateRange, search, src, dest, agent, app]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Derived: unique values for dropdowns
-  const statusOptions = Array.from(new Set(calls.map(c => c.status))).filter(Boolean).sort();
-  const callTypeOptions = Array.from(new Set(calls.map(c => c.call_type))).filter(Boolean).sort();
-  const appOptions = Array.from(new Set(calls.map(c => c.app))).filter(Boolean).sort();
+  // Fixed option lists (not derived from the current page — otherwise a filter
+  // could only pick values already present in the fetched batch).
+  const STATUS_OPTIONS = [
+    'ANSWERED', 'NO_ANSWER', 'BUSY', 'FAILURE', 'ABANDONED',
+    'CANCELED', 'DROPPED', 'OUT_OF_REACH',
+  ];
+  const DIRECTION_OPTIONS = ['IN', 'OUT', 'INTERNAL'];
+  const APP_OPTIONS = ['queue', 'ivr', 'direct'];
+
   // Count of hidden supervision (listen/whisper/barge) rows in the loaded set, so the
   // filter chip can advertise how many rows it is hiding.
   const supervisionCount = calls.filter(c => c.is_supervision).length;
@@ -775,14 +790,13 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
     return 'neutral';
   }
 
-  // Filtered + sorted. Search is applied server-side (whole history, incl. uniqueid/
-  // linkedid); status/type/app stay client-side over the fetched set.
+  // Filtered + sorted. Search / src / dest / agent / app are applied server-side;
+  // status / direction / supervision stay client-side over the fetched set.
   const filtered = calls.filter(c => {
     // Supervision (listen/whisper/barge) rows are hidden unless explicitly shown.
     if (!showSupervision && c.is_supervision) return false;
     if (statusFilter && c.status !== statusFilter) return false;
     if (callTypeFilter && c.call_type !== callTypeFilter) return false;
-    if (appFilter && c.app !== appFilter) return false;
     return true;
   });
 
@@ -799,7 +813,9 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
   const pageItems = sorted.slice(startIdx, startIdx + ITEMS_PER_PAGE);
 
   // Reset page on filter change
-  useEffect(() => { setCurrentPage(1); }, [searchQuery, statusFilter, callTypeFilter, appFilter, showSupervision, dateRange]);
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, srcFilter, destFilter, agentFilter, statusFilter, callTypeFilter, appFilter, showSupervision, dateRange]);
 
   const handleOpenQos = (call: CallLogRecord) => {
     const qos = parseQoS(call.QoS);
@@ -845,6 +861,51 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
 
   const filters: ToolbarFilter[] = [
     {
+      key: 'src',
+      label: t('callLog.table.src'),
+      active: Boolean(src),
+      control: (
+        <SearchInput
+          value={srcFilter}
+          onChange={setSrcFilter}
+          label={t('callLog.table.src')}
+          placeholder={t('callLog.filterSrcPlaceholder')}
+          urlSync={false}
+          className="cl-filter-field"
+        />
+      ),
+    },
+    {
+      key: 'dest',
+      label: t('callLog.table.dest'),
+      active: Boolean(dest),
+      control: (
+        <SearchInput
+          value={destFilter}
+          onChange={setDestFilter}
+          label={t('callLog.table.dest')}
+          placeholder={t('callLog.filterDestPlaceholder')}
+          urlSync={false}
+          className="cl-filter-field"
+        />
+      ),
+    },
+    {
+      key: 'agent',
+      label: t('callLog.table.agent'),
+      active: Boolean(agent),
+      control: (
+        <SearchInput
+          value={agentFilter}
+          onChange={setAgentFilter}
+          label={t('callLog.table.agent')}
+          placeholder={t('callLog.filterAgentPlaceholder')}
+          urlSync={false}
+          className="cl-filter-field"
+        />
+      ),
+    },
+    {
       key: 'status',
       label: t('callLog.table.status'),
       active: Boolean(statusFilter),
@@ -855,7 +916,7 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
           size="md"
           options={[
             { value: '', label: t('callLog.allStatuses') },
-            ...statusOptions.map(s => ({
+            ...STATUS_OPTIONS.map(s => ({
               value: s,
               label: t(`callLog.status.${s}`, { defaultValue: s }),
               dot: statusDot(s),
@@ -876,9 +937,9 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
           size="md"
           options={[
             { value: '', label: t('callLog.allDirections') },
-            ...callTypeOptions.map(ct => ({
+            ...DIRECTION_OPTIONS.map(ct => ({
               value: ct,
-              label: ct,
+              label: t(`callLog.callType.${ct}`, { defaultValue: ct }),
               dot: callTypeDot(ct),
             })),
           ]}
@@ -888,7 +949,7 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
     {
       key: 'app',
       label: t('callLog.table.app'),
-      active: Boolean(appFilter),
+      active: Boolean(app),
       control: (
         <FilterSelect
           value={appFilter}
@@ -896,7 +957,10 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
           size="md"
           options={[
             { value: '', label: t('callLog.allApps') },
-            ...appOptions.map(a => ({ value: a, label: a })),
+            ...APP_OPTIONS.map(a => ({
+              value: a,
+              label: t(`callLog.app.${a}`, { defaultValue: a }),
+            })),
           ]}
         />
       ),

@@ -186,6 +186,18 @@
   color: var(--text-primary);
 }
 
+.ui-toolbar-filter[data-active] .ui-search-input {
+  border-color: var(--accent-primary);
+}
+
+/* Compact column filters (Src / Dest / Agent) beside selects */
+.ui-toolbar-filter .cl-filter-field {
+  width: 100%;
+}
+.ui-toolbar-filter .cl-filter-field .ui-search-input {
+  padding-inline-start: 32px;
+}
+
 .ui-toolbar-action {
   display: flex;
   align-items: center;

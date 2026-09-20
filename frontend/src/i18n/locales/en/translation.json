@@ -160,6 +160,9 @@
     "title": "Call History",
     "viewManage": "View and manage call records",
     "searchPlaceholder": "Search by src or dest...",
+    "filterSrcPlaceholder": "Src…",
+    "filterDestPlaceholder": "Dest…",
+    "filterAgentPlaceholder": "Agent…",
     "sortOldest": "Sort: Oldest First",
     "sortNewest": "Sort: Newest First",
     "sortOldestBtn": "Oldest First",
@@ -226,6 +229,11 @@
       "OUT": "Outbound",
       "INTERNAL": "Internal",
       "UNKNOWN": "Unknown"
+    },
+    "app": {
+      "queue": "Queue",
+      "ivr": "IVR",
+      "direct": "Direct"
     },
     "audioQuality": {
       "excellent": "EXCELLENT",

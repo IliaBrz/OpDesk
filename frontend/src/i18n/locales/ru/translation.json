@@ -160,6 +160,9 @@
     "title": "История вызовов",
     "viewManage": "Просмотр и управление записями вызовов",
     "searchPlaceholder": "Поиск по источнику или назначению…",
+    "filterSrcPlaceholder": "От…",
+    "filterDestPlaceholder": "Кому…",
+    "filterAgentPlaceholder": "Оператор…",
     "sortOldest": "Сортировка: сначала старые",
     "sortNewest": "Сортировка: сначала новые",
     "sortOldestBtn": "Сначала старые",
@@ -282,6 +285,11 @@
       "OUT": "Исходящий",
       "INTERNAL": "Внутренний",
       "UNKNOWN": "Неизвестно"
+    },
+    "app": {
+      "queue": "Очередь",
+      "ivr": "IVR",
+      "direct": "Прямой"
     }
   },
   "softphone": {

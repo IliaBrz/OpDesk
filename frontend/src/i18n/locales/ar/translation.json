@@ -156,6 +156,9 @@
     "title": "سجل المكالمات",
     "viewManage": "عرض وإدارة سجلات المكالمات",
     "searchPlaceholder": "البحث بالمصدر أو الوجهة...",
+    "filterSrcPlaceholder": "المصدر…",
+    "filterDestPlaceholder": "الوجهة…",
+    "filterAgentPlaceholder": "الوكيل…",
     "sortOldest": "ترتيب: الأقدم أولاً",
     "sortNewest": "ترتيب: الأحدث أولاً",
     "sortOldestBtn": "الأقدم أولاً",
@@ -216,6 +219,17 @@
     "direction": {
       "incoming": "واردة",
       "outgoing": "صادرة"
+    },
+    "callType": {
+      "IN": "واردة",
+      "OUT": "صادرة",
+      "INTERNAL": "داخلية",
+      "UNKNOWN": "غير معروف"
+    },
+    "app": {
+      "queue": "قائمة انتظار",
+      "ivr": "IVR",
+      "direct": "مباشر"
     },
     "audioQuality": {
       "excellent": "ممتاز",
