@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { AppState, WebSocketMessage, ActionMessage } from '../types';
+import i18n from '../i18n';
 
 const RECONNECT_DELAY = 3000;
 
@@ -36,7 +37,7 @@ export function useWebSocket(token: string | null, options: UseWebSocketOptions 
   const [connected, setConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
   const [notifications, setNotifications] = useState<string[]>([]);
-  
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<number | null>(null);
 
@@ -60,13 +61,13 @@ export function useWebSocket(token: string | null, options: UseWebSocketOptions 
         if (token) ws.send(JSON.stringify({ token }));
         console.log('WebSocket connected');
         setConnected(true);
-        addNotification('Connected to server');
+        addNotification(i18n.t('notifications.connected'));
       };
 
       ws.onmessage = (event) => {
         try {
           const message: WebSocketMessage = JSON.parse(event.data);
-          
+
           if (message.type === 'initial_state' || message.type === 'state_update') {
             if (message.data) {
               setState(message.data);
@@ -79,7 +80,7 @@ export function useWebSocket(token: string | null, options: UseWebSocketOptions 
               addNotification(message.success ? `✓ ${message.message}` : `✗ ${message.message}`);
             }
           } else if (message.type === 'error') {
-            addNotification(`Error: ${message.message}`);
+            addNotification(i18n.t('notifications.error', { message: message.message }));
           }
         } catch (e) {
           console.error('Failed to parse WebSocket message:', e);
@@ -117,7 +118,7 @@ export function useWebSocket(token: string | null, options: UseWebSocketOptions 
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(action));
     } else {
-      addNotification('Not connected to server');
+      addNotification(i18n.t('notifications.notConnected'));
     }
   }, [addNotification]);
 
@@ -141,7 +142,7 @@ export function useWebSocket(token: string | null, options: UseWebSocketOptions 
     connected,
     lastUpdate,
     notifications,
+    addNotification,
     sendAction,
   };
 }
-

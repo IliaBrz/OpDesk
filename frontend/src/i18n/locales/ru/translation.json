@@ -625,7 +625,14 @@
     "noRecording": "Нет записи",
     "retry": "Повторить",
     "prev": "Назад",
-    "next": "Далее"
+    "next": "Далее",
+    "copied": "Скопировано",
+    "copyNumber": "Скопировать номер"
+  },
+  "notifications": {
+    "connected": "Подключено к серверу",
+    "notConnected": "Нет подключения к серверу",
+    "error": "Ошибка: {{message}}"
   },
   "analytics": {
     "title": "Аналитика",

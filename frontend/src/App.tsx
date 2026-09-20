@@ -5,6 +5,7 @@ import { setLanguage, SUPPORTED_LANGUAGES } from './i18n';
 import { useWebSocket } from './hooks/useWebSocket';
 import { useWebPhone } from './hooks/useWebPhone';
 import { WebPhoneProvider } from './contexts/WebPhoneContext';
+import { NotificationProvider } from './contexts/NotificationContext';
 import { getToken, setUser, getUser, fetchWithAuth } from './auth';
 import { rlog } from './lib/remoteLog';
 import { subscribeWebPush } from './lib/webPush';
@@ -164,7 +165,7 @@ function App({ onLogout }: AppProps) {
       .catch(() => setNewNotifCount(0));
   }, []);
 
-  const { state, connected, lastUpdate, notifications, sendAction } = useWebSocket(token, {
+  const { state, connected, lastUpdate, notifications, addNotification, sendAction } = useWebSocket(token, {
     onAuthFailure: handleLogout,
     onCallNotificationNew: fetchNewNotifCount,
   });
@@ -561,6 +562,7 @@ function App({ onLogout }: AppProps) {
   };
 
   return (
+    <NotificationProvider notify={addNotification}>
     <WebPhoneProvider value={webPhone}>
     <div className="app">
 
@@ -1039,6 +1041,7 @@ function App({ onLogout }: AppProps) {
       </div>
     </div>
     </WebPhoneProvider>
+    </NotificationProvider>
   );
 }
 

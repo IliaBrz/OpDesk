@@ -625,7 +625,14 @@
     "noRecording": "No recording",
     "retry": "Retry",
     "prev": "Previous",
-    "next": "Next"
+    "next": "Next",
+    "copied": "Copied",
+    "copyNumber": "Copy number"
+  },
+  "notifications": {
+    "connected": "Connected to server",
+    "notConnected": "Not connected to server",
+    "error": "Error: {{message}}"
   },
   "analytics": {
     "title": "Analytics",

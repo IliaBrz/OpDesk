@@ -13,6 +13,7 @@ import type { CallLogRecord, QoSData, CallJourneyEvent } from '../types';
 import { getAuthHeaders, fetchWithAuth } from '../auth';
 import { PageRange } from './PageRange';
 import type { DateRange } from './analyticsUtils';
+import { CopyablePhone } from './CopyablePhone';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -474,7 +475,10 @@ function CallJourneyModal({ call, journey, onClose }: CallJourneyModalProps) {
           <div className="cl-journey-summary">
             <div className="cl-journey-summary-row">
               <span className="cl-journey-summary-label">{t('callLog.journey.contact')}</span>
-              <span className="cl-journey-summary-value cl-journey-phone">{call.phone_number || call.src || '—'}</span>
+              <CopyablePhone
+                className="cl-journey-summary-value cl-journey-phone"
+                value={call.phone_number || call.src}
+              />
             </div>
             <div className="cl-journey-summary-meta">
               <span className="cl-journey-date">{summary.date}</span>
@@ -998,12 +1002,10 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                 return (
                   <tr key={`${call.calldate}-${idx}`} className={idx % 2 === 0 ? 'cl-row-even' : 'cl-row-odd'}>
                     <td data-label={t('callLog.table.src')}>
-                      <span className="cl-phone">{call.src || '—'}</span>
+                      <CopyablePhone className="cl-phone" value={call.src} />
                     </td>
                     <td data-label={t('callLog.table.dest')}>
-                      <span className="cl-phone">
-                        {call.dst || '—'}
-                      </span>
+                      <CopyablePhone className="cl-phone" value={call.dst} />
                     </td>
                     <td data-label={t('callLog.table.app')}>{call.app || '—'}</td>
                     <td data-label={t('callLog.table.direction')}>

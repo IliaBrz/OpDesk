@@ -615,7 +615,14 @@
     "noRecording": "لا يوجد تسجيل",
     "retry": "إعادة المحاولة",
     "prev": "السابق",
-    "next": "التالي"
+    "next": "التالي",
+    "copied": "تم النسخ",
+    "copyNumber": "نسخ الرقم"
+  },
+  "notifications": {
+    "connected": "تم الاتصال بالخادم",
+    "notConnected": "غير متصل بالخادم",
+    "error": "خطأ: {{message}}"
   },
   "analytics": {
     "title": "التحليلات",

@@ -20,6 +20,7 @@ import type { LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useWebPhoneContext } from '../contexts/WebPhoneContext';
 import { useAudioLevels } from '../hooks/useAudioLevels';
+import { CopyablePhone } from './CopyablePhone';
 import { AgentStatusHeader } from './AgentStatusHeader';
 import type { AgentPresence } from './AgentStatusBar';
 
@@ -125,7 +126,7 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
           onCall={hasActiveCall}
         />
         <div className="softphone-incoming-body">
-          <div className="softphone-caller-number">{incomingCall.callerNumber}</div>
+          <CopyablePhone className="softphone-caller-number" value={incomingCall.callerNumber} />
           <div className="softphone-caller-name">{incomingCall.callerName || t('softphone.incomingCall')}</div>
           <div className="softphone-status-row">
             <button type="button" className="softphone-status-badge" disabled>
@@ -180,7 +181,7 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
           onCall={hasActiveCall}
         />
         <div className="softphone-incall-body">
-          <div className="softphone-incall-number">{inCallNumber || '—'}</div>
+          <CopyablePhone className="softphone-incall-number" value={inCallNumber || null} />
           <div className="softphone-incall-name">{inCallName}</div>
           <div className="softphone-incall-duration">{inCallDuration}</div>
           {isCallAnswered && callStats && callStats.mos != null && (() => {

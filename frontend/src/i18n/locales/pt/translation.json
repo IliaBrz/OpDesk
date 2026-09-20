@@ -615,7 +615,14 @@
     "noRecording": "Sem gravação",
     "retry": "Tentar novamente",
     "prev": "Anterior",
-    "next": "Próximo"
+    "next": "Próximo",
+    "copied": "Copiado",
+    "copyNumber": "Copiar número"
+  },
+  "notifications": {
+    "connected": "Conectado ao servidor",
+    "notConnected": "Não conectado ao servidor",
+    "error": "Erro: {{message}}"
   },
   "analytics": {
     "title": "Análises",

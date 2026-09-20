@@ -3703,6 +3703,20 @@ select.an-filter-select option:checked {
   font-size: 13px;
 }
 
+/* Click-to-copy phone numbers (softphone + call history) */
+.copyable-phone {
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease;
+}
+.copyable-phone:hover {
+  background: color-mix(in srgb, var(--accent-primary) 12%, transparent);
+}
+.copyable-phone:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
 /* Customer name */
 .cl-customer {
   color: var(--text-secondary);
