@@ -79,6 +79,95 @@ def get_default_locale() -> str:
     base = raw.split("-", 1)[0].split("_", 1)[0]
     return base if base in SUPPORTED_UI_LOCALES else "en"
 
+
+# Default ICE list (previous hardcoded Google STUN). Used when OPDESK_ICE_SERVERS is empty.
+_DEFAULT_ICE_SERVERS = [
+    {"urls": "stun:stun.l.google.com:19302"},
+    {"urls": "stun:stun1.l.google.com:19302"},
+    {"urls": "stun:stun2.l.google.com:19302"},
+]
+
+
+def _normalize_ice_server(entry) -> Optional[dict]:
+    """Coerce one RTCIceServer-like dict; return None if unusable."""
+    if not isinstance(entry, dict):
+        return None
+    urls = entry.get("urls") or entry.get("url")
+    if not urls:
+        return None
+    out: dict = {"urls": urls}
+    if entry.get("username") is not None:
+        out["username"] = str(entry["username"])
+    if entry.get("credential") is not None:
+        out["credential"] = str(entry["credential"])
+    if entry.get("credentialType") in ("password", "oauth"):
+        out["credentialType"] = entry["credentialType"]
+    return out
+
+
+def _parse_ice_url(spec: str) -> Optional[dict]:
+    """Parse a single stun:/turn:/turns: URL, optionally turn:user:pass@host:port."""
+    spec = (spec or "").strip()
+    if not spec:
+        return None
+    m = re.match(r"^(turns?):(?:([^:@\s]+):([^@]*)@)?(.+)$", spec, re.IGNORECASE)
+    if not m:
+        # Bare host → assume stun
+        if "://" not in spec and not spec.lower().startswith(("stun:", "turn:")):
+            spec = f"stun:{spec}"
+        return {"urls": spec}
+    scheme, user, password, rest = m.group(1).lower(), m.group(2), m.group(3), m.group(4)
+    urls = f"{scheme}:{rest}"
+    if user is not None:
+        return {"urls": urls, "username": user, "credential": password or ""}
+    return {"urls": urls}
+
+
+def get_ice_servers() -> list:
+    """
+    WebRTC ICE servers from OPDESK_ICE_SERVERS (.env).
+
+    Accepts either:
+      - JSON array of RTCIceServer objects, e.g.
+        [{"urls":"stun:…"},{"urls":"turn:…","username":"u","credential":"p"}]
+      - Comma / semicolon / newline separated URLs, e.g.
+        stun:stun.l.google.com:19302,turn:user:secret@turn.example.com:3478
+
+    Empty / invalid → Google public STUN (legacy default).
+    """
+    raw = (os.getenv("OPDESK_ICE_SERVERS") or "").strip()
+    if not raw:
+        return [dict(s) for s in _DEFAULT_ICE_SERVERS]
+
+    servers: list = []
+    if raw.startswith("["):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as e:
+            log.warning("OPDESK_ICE_SERVERS JSON invalid (%s); using defaults", e)
+            return [dict(s) for s in _DEFAULT_ICE_SERVERS]
+        if not isinstance(parsed, list):
+            log.warning("OPDESK_ICE_SERVERS must be a JSON array; using defaults")
+            return [dict(s) for s in _DEFAULT_ICE_SERVERS]
+        for item in parsed:
+            if isinstance(item, str):
+                norm = _parse_ice_url(item)
+            else:
+                norm = _normalize_ice_server(item)
+            if norm:
+                servers.append(norm)
+    else:
+        for part in re.split(r"[\n,;]+", raw):
+            norm = _parse_ice_url(part.strip())
+            if norm:
+                servers.append(norm)
+
+    if not servers:
+        log.warning("OPDESK_ICE_SERVERS produced no usable entries; using defaults")
+        return [dict(s) for s in _DEFAULT_ICE_SERVERS]
+    return servers
+
+
 # Import CRM connector
 try:
     from crm import (
@@ -1575,11 +1664,22 @@ async def webrtc_config(request: Request, current_user: dict = Depends(get_curre
             scheme, port, path = m.group(1), m.group(2) or "", m.group(3) or "/sip-ws"
             server = f"{scheme}{domain}{port}{path}"
     creds = get_user_webrtc_credentials(current_user["id"])
+    ice_servers = get_ice_servers()
     if not creds:
-        return {"server": server, "extension": None, "extension_secret": None}
+        return {
+            "server": server,
+            "extension": None,
+            "extension_secret": None,
+            "ice_servers": ice_servers,
+        }
     ext = creds.get("extension")
     secret = get_extension_secret_from_db(ext) if ext else None
-    return {"server": server, "extension": ext, "extension_secret": secret}
+    return {
+        "server": server,
+        "extension": ext,
+        "extension_secret": secret,
+        "ice_servers": ice_servers,
+    }
 
 
 class DeviceTokenBody(BaseModel):

@@ -53,7 +53,7 @@ export interface WebPhoneCallbacks {
   onMutedChange?: (muted: boolean) => void;
 }
 
-const ICE_SERVERS: RTCIceServer[] = [
+const DEFAULT_ICE_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
@@ -62,10 +62,12 @@ const ICE_SERVERS: RTCIceServer[] = [
 /** Max ms to wait for ICE gathering before sending INVITE (reduces call setup delay). */
 const ICE_GATHERING_TIMEOUT_MS = 800;
 
-const PEER_CONNECTION_CONFIG: RTCConfiguration = {
-  iceServers: ICE_SERVERS,
-  iceCandidatePoolSize: 1, // Pre-gather candidates for faster setup
-};
+function peerConnectionConfig(iceServers: RTCIceServer[]): RTCConfiguration {
+  return {
+    iceServers: iceServers.length > 0 ? iceServers : DEFAULT_ICE_SERVERS,
+    iceCandidatePoolSize: 1, // Pre-gather candidates for faster setup
+  };
+}
 
 function parseDomain(server: string): string {
   let domain = server.replace('wss://', '').replace('ws://', '');
@@ -88,9 +90,23 @@ export class WebPhone {
   private holdState: boolean = false;
   private stopping: boolean = false;
   private onVisibilityChange: (() => void) | null = null;
+  private iceServers: RTCIceServer[];
 
-  constructor(callbacks: WebPhoneCallbacks = {}) {
+  constructor(callbacks: WebPhoneCallbacks = {}, iceServers?: RTCIceServer[]) {
     this.callbacks = callbacks;
+    this.iceServers =
+      iceServers && iceServers.length > 0 ? iceServers : DEFAULT_ICE_SERVERS;
+  }
+
+  /** Update ICE servers (from /api/webrtc/config). Applies to the next call/session. */
+  setIceServers(iceServers: RTCIceServer[]): void {
+    if (iceServers && iceServers.length > 0) {
+      this.iceServers = iceServers;
+    }
+  }
+
+  private get peerConnectionConfiguration(): RTCConfiguration {
+    return peerConnectionConfig(this.iceServers);
   }
 
   get isConnected(): boolean {
@@ -388,7 +404,7 @@ export class WebPhone {
             }
           : undefined,
         sessionDescriptionHandlerFactoryOptions: {
-          peerConnectionConfiguration: PEER_CONNECTION_CONFIG,
+          peerConnectionConfiguration: this.peerConnectionConfiguration,
         },
       };
 
@@ -588,7 +604,7 @@ export class WebPhone {
         sessionDescriptionHandlerOptions: {
           constraints: { audio: true, video: false },
           mediaStream: this.localStream,
-          peerConnectionConfiguration: PEER_CONNECTION_CONFIG,
+          peerConnectionConfiguration: this.peerConnectionConfiguration,
           iceGatheringTimeout: ICE_GATHERING_TIMEOUT_MS,
         } as InviterOptions['sessionDescriptionHandlerOptions'],
       };
@@ -659,7 +675,7 @@ export class WebPhone {
       sessionDescriptionHandlerOptions: {
         constraints: { audio: true, video: false },
         mediaStream: this.localStream,
-        peerConnectionConfiguration: PEER_CONNECTION_CONFIG,
+        peerConnectionConfiguration: this.peerConnectionConfiguration,
         iceGatheringTimeout: ICE_GATHERING_TIMEOUT_MS,
       } as InvitationAcceptOptions['sessionDescriptionHandlerOptions'],
     };

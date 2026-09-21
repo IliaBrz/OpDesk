@@ -17,6 +17,24 @@ export interface WebRtcConfig {
   server: string;
   extension: string | null;
   extension_secret: string | null;
+  iceServers: RTCIceServer[];
+}
+
+function normalizeIceServers(raw: unknown): RTCIceServer[] {
+  if (!Array.isArray(raw) || raw.length === 0) return [];
+  const out: RTCIceServer[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const urls = (item as RTCIceServer).urls ?? (item as { url?: string | string[] }).url;
+    if (!urls) continue;
+    const entry: RTCIceServer = { urls };
+    const username = (item as RTCIceServer).username;
+    const credential = (item as RTCIceServer).credential;
+    if (username != null) entry.username = String(username);
+    if (credential != null) entry.credential = String(credential);
+    out.push(entry);
+  }
+  return out;
 }
 
 export function useWebPhone() {
@@ -65,6 +83,7 @@ export function useWebPhone() {
         server: data.server || '',
         extension: data.extension ?? null,
         extension_secret: data.extension_secret ?? null,
+        iceServers: normalizeIceServers(data.ice_servers),
       });
     } catch (e) {
       setConfigError(e instanceof Error ? e.message : 'Failed to load config');
@@ -230,7 +249,7 @@ export function useWebPhone() {
       phoneRef.current.disconnect('connect-replace');
       phoneRef.current = null;
     }
-    const phone = new WebPhone(callbacks);
+    const phone = new WebPhone(callbacks, config.iceServers);
     phoneRef.current = phone;
     setRemoteStream(null);
     setLogs((prev) => [...prev, { message: 'Connecting...', type: 'info', time: new Date().toLocaleTimeString() }]);
