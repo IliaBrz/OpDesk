@@ -1458,15 +1458,23 @@ async def start_aggregation_loop():
             current_hour = now.replace(minute=0, second=0, microsecond=0)
             prev_hour = current_hour - timedelta(hours=1)
 
-            # Hourly buckets
-            refresh_hourly_bucket(current_hour, thresholds, default_secs, short_abandon_secs)
-            refresh_hourly_bucket(prev_hour, thresholds, default_secs, short_abandon_secs)
+            # Hourly buckets (sync MySQL — keep off the event loop)
+            await asyncio.to_thread(
+                refresh_hourly_bucket, current_hour, thresholds, default_secs, short_abandon_secs
+            )
+            await asyncio.to_thread(
+                refresh_hourly_bucket, prev_hour, thresholds, default_secs, short_abandon_secs
+            )
 
             # Daily buckets (today + yesterday)
-            refresh_daily_bucket(now.date(), thresholds, default_secs, short_abandon_secs, fcr_window_days)
-            refresh_daily_bucket(
+            await asyncio.to_thread(
+                refresh_daily_bucket, now.date(), thresholds, default_secs,
+                short_abandon_secs, fcr_window_days,
+            )
+            await asyncio.to_thread(
+                refresh_daily_bucket,
                 (now - timedelta(days=1)).date(),
-                thresholds, default_secs, short_abandon_secs, fcr_window_days
+                thresholds, default_secs, short_abandon_secs, fcr_window_days,
             )
 
             log.debug(f"analytics: aggregation cycle complete ({now.strftime('%H:%M')})")

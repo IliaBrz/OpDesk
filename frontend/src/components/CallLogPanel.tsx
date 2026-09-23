@@ -174,10 +174,35 @@ const ITEMS_PER_PAGE = 25;
 interface AudioPlayerProps {
   recordingPath: string | null;
   recordingFile: string | null;
+  calldate?: string | null;
   onVadClick?: () => void;
 }
 
-function AudioPlayer({ recordingPath, recordingFile, onVadClick }: AudioPlayerProps) {
+/** FreePBX layout: YYYY/MM/DD/basename — no NFS walk on the list path. */
+function recordingUrlPath(
+  recordingPath: string | null | undefined,
+  recordingFile: string | null | undefined,
+  calldate?: string | null,
+): string | null {
+  if (recordingPath) {
+    const normalized = recordingPath.replace(/\\/g, '/');
+    if (normalized.startsWith('/')) {
+      const marker = '/monitor/';
+      const idx = normalized.indexOf(marker);
+      if (idx >= 0) return normalized.slice(idx + marker.length);
+    }
+    return normalized.replace(/^\//, '');
+  }
+  if (!recordingFile) return null;
+  const file = recordingFile.replace(/\\/g, '/');
+  if (file.includes('/')) return file.replace(/^\//, '');
+  const m = String(calldate || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return null;
+  const base = file.split('/').pop() || file;
+  return `${m[1]}/${m[2]}/${m[3]}/${base}`;
+}
+
+function AudioPlayer({ recordingPath, recordingFile, calldate, onVadClick }: AudioPlayerProps) {
   const { t } = useTranslation();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
@@ -185,17 +210,35 @@ function AudioPlayer({ recordingPath, recordingFile, onVadClick }: AudioPlayerPr
   const [duration, setDuration] = useState(0);
   const [loaded, setLoaded] = useState(false);
   const [errored, setErrored] = useState(false);
+  // Attach <audio src> only on play — avoids NFS metadata hits for every row.
+  const [activated, setActivated] = useState(false);
+  const [pendingPlay, setPendingPlay] = useState(false);
 
-  if (!recordingPath || errored) {
+  const relPath = recordingUrlPath(recordingPath, recordingFile, calldate);
+
+  useEffect(() => {
+    if (!activated || !pendingPlay) return;
+    const el = audioRef.current;
+    if (!el) return;
+    setPendingPlay(false);
+    el.play().catch(() => { setErrored(true); });
+  }, [activated, pendingPlay]);
+
+  if (!relPath || errored) {
     return (
       <span className="cl-no-recording">🎵 {t('callLog.noRecording')}</span>
     );
   }
 
   const token = getAuthHeaders().Authorization?.replace(/^Bearer\s+/i, '') || '';
-  const audioUrl = `/api/recordings/${encodeURIComponent(recordingPath)}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
+  const audioUrl = `/api/recordings/${relPath.split('/').map(encodeURIComponent).join('/')}${token ? `?token=${encodeURIComponent(token)}` : ''}`;
 
   const togglePlay = () => {
+    if (!activated) {
+      setActivated(true);
+      setPendingPlay(true);
+      return;
+    }
     const el = audioRef.current;
     if (!el) return;
     if (playing) {
@@ -237,8 +280,8 @@ function AudioPlayer({ recordingPath, recordingFile, onVadClick }: AudioPlayerPr
     <div className="cl-audio-player">
       <audio
         ref={audioRef}
-        src={audioUrl}
-        preload="metadata"
+        src={activated ? audioUrl : undefined}
+        preload="none"
         onTimeUpdate={handleTimeUpdate}
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={handleEnded}
@@ -254,7 +297,10 @@ function AudioPlayer({ recordingPath, recordingFile, onVadClick }: AudioPlayerPr
         href={audioUrl}
         download={recordingFile || 'recording'}
         title={t('callLog.download')}
-        onClick={e => e.stopPropagation()}
+        onClick={e => {
+          e.stopPropagation();
+          setActivated(true);
+        }}
       >
         <Download size={14} />
       </a>
@@ -1110,6 +1156,7 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                       <AudioPlayer
                         recordingPath={call.recording_path}
                         recordingFile={call.recording_file}
+                        calldate={call.calldate}
                         onVadClick={call.uniqueid ? () => handleOpenVad(call) : undefined}
                       />
                     </td>

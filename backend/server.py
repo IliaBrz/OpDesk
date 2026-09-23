@@ -1363,13 +1363,19 @@ app.add_middleware(
 # Auth: JWT
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = 24
+_jwt_secret_cached: Optional[str] = None
 
 
 def _get_jwt_secret() -> str:
+    """Return JWT secret (cached after first DB/env read — avoids a MySQL round-trip per request)."""
+    global _jwt_secret_cached
+    if _jwt_secret_cached is not None:
+        return _jwt_secret_cached
     secret = get_setting("JWT_SECRET", os.getenv("JWT_SECRET", "")).strip()
     if not secret:
         secret = "opdesk-dev-secret-change-in-production"
         log.warning("JWT_SECRET not set; using default (set JWT_SECRET in production)")
+    _jwt_secret_cached = secret
     return secret
 
 
@@ -1450,7 +1456,8 @@ async def get_current_user(
     unreachable by a key. "Unifying" the two dependencies would silently promote every
     API key to a full admin credential.
     """
-    return _user_from_jwt(credentials)
+    # User-scope MySQL off the event loop so a slow DB never freezes other requests.
+    return await asyncio.to_thread(_user_from_jwt, credentials)
 
 
 # ---------------------------------------------------------------------------
@@ -1523,7 +1530,7 @@ def require_scope(scope: str):
     ) -> dict:
         raw_key = _extract_api_key(request)
         if raw_key:
-            meta = lookup_api_key(raw_key) if lookup_api_key else None
+            meta = await asyncio.to_thread(lookup_api_key, raw_key) if lookup_api_key else None
             if not meta:
                 raise HTTPException(status_code=401, detail="Invalid or expired API key")
             if scope not in (meta.get("scopes") or []):
@@ -1531,7 +1538,7 @@ def require_scope(scope: str):
                     status_code=403,
                     detail=f"API key missing required scope: {scope}")
             return _apikey_principal(meta)
-        return _user_from_jwt(credentials)
+        return await asyncio.to_thread(_user_from_jwt, credentials)
 
     return dependency
 
@@ -1601,13 +1608,13 @@ async def auth_login(body: LoginBody, request: Request):
     password = body.password or ""
     if not login or not password:
         raise HTTPException(status_code=400, detail="Login and password required")
-    user = authenticate_user(login, password)
+    user = await asyncio.to_thread(authenticate_user, login, password)
     if not user:
         _record_login_failure(client_ip)
         raise HTTPException(status_code=401, detail="Invalid extension/username or password")
     _clear_login_failures(client_ip)
     token = create_access_token(user)
-    scope = _get_user_scope(user["id"])
+    scope = await asyncio.to_thread(_get_user_scope, user["id"])
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -3968,13 +3975,23 @@ async def get_call_log_endpoint(
         app_q = (app or "").strip().lower() or None
         if app_q and app_q not in ("queue", "ivr", "direct"):
             app_q = None
-        data = get_call_log(limit=limit, date=date,
-                            date_from=date_from, date_to=date_to,
-                            allowed_extensions=allowed_ext, search=search_q,
-                            src=src_q, dest=dest_q, agent=agent_q, app=app_q)
-        total = get_call_log_count_from_db(date=date, date_from=date_from, date_to=date_to,
-                                           allowed_extensions=allowed_ext, search=search_q,
-                                           src=src_q, dest=dest_q, agent=agent_q, app=app_q)
+
+        def _fetch():
+            rows = get_call_log(
+                limit=limit, date=date,
+                date_from=date_from, date_to=date_to,
+                allowed_extensions=allowed_ext, search=search_q,
+                src=src_q, dest=dest_q, agent=agent_q, app=app_q,
+                enrich=True, resolve_recordings=False,
+            )
+            total_count = get_call_log_count_from_db(
+                date=date, date_from=date_from, date_to=date_to,
+                allowed_extensions=allowed_ext, search=search_q,
+                src=src_q, dest=dest_q, agent=agent_q, app=app_q,
+            )
+            return rows, total_count
+
+        data, total = await asyncio.to_thread(_fetch)
         return {"calls": data, "total": total}
     except Exception as e:
         log.error(f"Error fetching call log: {e}")
@@ -3993,10 +4010,13 @@ async def get_call_journey_endpoint(
     if not linkedid or linkedid.strip() == "":
         raise HTTPException(status_code=400, detail="linkedid is required")
     try:
-        cdr_rows = get_cdr_by_linkedid(linkedid.strip())
-        if not cdr_rows:
-            return {"journey": []}
-        journey = build_call_journey_from_cdr(cdr_rows)
+        def _fetch_journey():
+            cdr_rows = get_cdr_by_linkedid(linkedid.strip())
+            if not cdr_rows:
+                return []
+            return build_call_journey_from_cdr(cdr_rows)
+
+        journey = await asyncio.to_thread(_fetch_journey)
         return {"journey": journey}
     except Exception as e:
         log.error(f"Error fetching call journey: {e}")
@@ -4012,7 +4032,7 @@ async def get_call_vad_endpoint(
     if not uniqueid or uniqueid.strip() == "":
         raise HTTPException(status_code=400, detail="uniqueid is required")
     try:
-        data = get_call_vad_from_db(uniqueid.strip())
+        data = await asyncio.to_thread(get_call_vad_from_db, uniqueid.strip())
         if data is None:
             raise HTTPException(status_code=404, detail="No VAD data found for this call")
         # segments is stored as JSON string — parse it
@@ -4115,7 +4135,7 @@ async def serve_recording(
     # Validate auth: API key, Bearer header, or query token
     raw_key = _extract_api_key(request)
     if raw_key:
-        meta = lookup_api_key(raw_key) if lookup_api_key else None
+        meta = await asyncio.to_thread(lookup_api_key, raw_key) if lookup_api_key else None
         if not meta:
             raise HTTPException(status_code=401, detail="Invalid or expired API key")
         if "cdr:read" not in (meta.get("scopes") or []):
@@ -4128,25 +4148,30 @@ async def serve_recording(
 
     # Security: only allow serving files from the recording root directory
     root_dir = os.getenv('ASTERISK_RECORDING_ROOT_DIR')
-    
-    # Normalize paths, resolving symlinks to prevent traversal
-    if not os.path.isabs(file_path):
-        file_path = os.path.join(root_dir, file_path)
-    requested_path = os.path.realpath(file_path)
-    root_real = os.path.realpath(root_dir)
+    if not root_dir:
+        raise HTTPException(status_code=500, detail="Recording root not configured")
 
-    # Security check: ensure the resolved path is within the recording root
-    if not requested_path.startswith(root_real + os.sep) and requested_path != root_real:
+    def _resolve_recording(path_arg: str, root: str):
+        # Normalize paths, resolving symlinks to prevent traversal
+        candidate = path_arg
+        if not os.path.isabs(candidate):
+            candidate = os.path.join(root, candidate)
+        requested = os.path.realpath(candidate)
+        root_real = os.path.realpath(root)
+        if not requested.startswith(root_real + os.sep) and requested != root_real:
+            return None, "denied"
+        if not os.path.isfile(requested):
+            return None, "missing"
+        content_type, _ = mimetypes.guess_type(requested)
+        return (requested, content_type or "audio/wav"), None
+
+    resolved, err = await asyncio.to_thread(_resolve_recording, file_path, root_dir)
+    if err == "denied":
         raise HTTPException(status_code=403, detail="Access denied")
-    
-    if not os.path.exists(requested_path) or not os.path.isfile(requested_path):
+    if err == "missing" or not resolved:
         raise HTTPException(status_code=404, detail="Recording not found")
-    
-    # Determine content type
-    content_type, _ = mimetypes.guess_type(requested_path)
-    if not content_type:
-        content_type = "audio/wav"
-    
+
+    requested_path, content_type = resolved
     return AudioFileResponse(
         requested_path,
         media_type=content_type,

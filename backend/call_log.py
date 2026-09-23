@@ -1,13 +1,11 @@
 import os
 import re
-import time
-import threading
 from pathlib import Path
 from db_manager import (
     get_call_log_from_db, get_cdr_by_linkedid, get_supervision_by_spy_keys,
     get_agent_name_by_extension,
 )
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 
 
 # ===========================================================================
@@ -198,91 +196,101 @@ def convert_channel_to_extension(dstchannel,channel):
 # ---------------------------------------------------------------------------
 # Recording path resolution
 #
-# The recording filename stored in the CDR is only a basename; the actual file
-# lives somewhere under ASTERISK_RECORDING_ROOT_DIR (FreePBX nests them under
-# YYYY/MM/DD/). Resolving it used to mean a full recursive glob of the whole
-# recordings tree PER CALL — so one call-history page (100 rows) or an analytics
-# period (thousands of rows) triggered that many complete directory walks, which
-# dominated the load time and got worse as recordings accumulated.
-#
-# Instead we build a single {basename -> absolute path} index and cache it. Hits
-# are O(1) dict lookups, and the tree is walked at most once per TTL regardless
-# of how many calls are on the page. A cache miss (a recording that landed after
-# the last build) triggers at most one throttled rebuild so brand-new recordings
-# are still found without hammering the disk.
+# FreePBX stores MixMonitor files under ASTERISK_RECORDING_ROOT_DIR/YYYY/MM/DD/.
+# The CDR `recordingfile` is usually only the basename. Never walk the whole
+# tree (on NFS that is O(hundreds of thousands of files) and blocks the server).
+# Resolve with a handful of Path.is_file() probes using calldate instead.
 # ---------------------------------------------------------------------------
-_REC_INDEX: dict = {}
-_REC_INDEX_BUILT_AT: float = 0.0      # monotonic timestamp of last successful build
-_REC_INDEX_TTL = 120.0                # seconds a built index is trusted before refresh
-_REC_MISS_REBUILD_INTERVAL = 15.0     # min seconds between miss-triggered rebuilds
-_REC_INDEX_LOCK = threading.Lock()
 
 
 def _recording_root() -> Path:
-    return Path(os.getenv('ASTERISK_RECORDING_ROOT_DIR', '/home/ibrahim/pyc/voip/'))
+    return Path(os.getenv('ASTERISK_RECORDING_ROOT_DIR', '/var/spool/asterisk/monitor'))
 
 
-def _build_recording_index() -> dict:
-    """Walk the recordings tree once and map each file's basename to its path."""
-    index: dict = {}
-    try:
-        for path in _recording_root().glob('**/*'):
-            if path.is_file():
-                # Last write wins if two dirs hold the same basename; recording
-                # filenames are unique in practice (they embed the uniqueid).
-                index[path.name] = path
-    except OSError:
-        # Recordings dir missing / unreadable — return whatever we have (maybe {}).
-        pass
-    return index
+def _as_date(calldate) -> date | None:
+    """Normalize CDR calldate (datetime / 'YYYY-MM-DD …' / date) to a date."""
+    if calldate is None:
+        return None
+    if isinstance(calldate, datetime):
+        return calldate.date()
+    if isinstance(calldate, date):
+        return calldate
+    text = str(calldate).strip()
+    if len(text) >= 10 and text[4] == '-' and text[7] == '-':
+        try:
+            return date(int(text[0:4]), int(text[5:7]), int(text[8:10]))
+        except ValueError:
+            return None
+    return None
 
 
-def _get_recording_index(force: bool = False) -> dict:
-    """Return the cached basename->path index, rebuilding when stale or forced."""
-    global _REC_INDEX, _REC_INDEX_BUILT_AT
-    now = time.monotonic()
-    if not force and _REC_INDEX_BUILT_AT and (now - _REC_INDEX_BUILT_AT) < _REC_INDEX_TTL:
-        return _REC_INDEX
-    with _REC_INDEX_LOCK:
-        # Re-check inside the lock: another thread may have just rebuilt it.
-        now = time.monotonic()
-        if not force and _REC_INDEX_BUILT_AT and (now - _REC_INDEX_BUILT_AT) < _REC_INDEX_TTL:
-            return _REC_INDEX
-        _REC_INDEX = _build_recording_index()
-        _REC_INDEX_BUILT_AT = time.monotonic()
-        return _REC_INDEX
+def recording_relpath(file_wav, calldate=None) -> str | None:
+    """Return path relative to the recording root (YYYY/MM/DD/basename), or None.
 
-
-def get_recording_path(file_wav):
-    """Resolve a CDR recording filename to its on-disk Path via the cached index.
-
-    O(1) after the index is warm. Falls back to a throttled rebuild (so recently
-    finished calls are found) and finally a substring scan of the in-memory index
-    (no disk I/O) to preserve the old partial-match behaviour."""
+    Does not touch the filesystem — safe to call when building list responses.
+    """
     if not file_wav:
         return None
-    name = os.path.basename(str(file_wav))
-    index = _get_recording_index()
+    raw = str(file_wav).strip().replace('\\', '/')
+    if not raw:
+        return None
 
-    hit = index.get(name)
-    if hit is not None:
-        return hit
+    # Already a relative FreePBX path (or absolute under root — strip root).
+    root = _recording_root()
+    if os.path.isabs(raw):
+        try:
+            rel = Path(raw).resolve().relative_to(root.resolve())
+            return str(rel).replace('\\', '/')
+        except (ValueError, OSError):
+            raw = os.path.basename(raw)
 
-    # Miss: the recording may have landed after the last build. Rebuild at most
-    # once per interval to pick it up without triggering a walk on every miss.
-    global _REC_INDEX_BUILT_AT
-    if (time.monotonic() - _REC_INDEX_BUILT_AT) >= _REC_MISS_REBUILD_INTERVAL:
-        index = _get_recording_index(force=True)
-        hit = index.get(name)
-        if hit is not None:
-            return hit
+    if '/' in raw.strip('/'):
+        return raw.lstrip('/')
 
-    # Preserve the legacy substring semantics (recordingfile stored as a partial),
-    # but over the in-memory index only — no filesystem walk.
-    needle = str(file_wav)
-    for basename, path in index.items():
-        if needle in basename or needle in str(path):
-            return path
+    day = _as_date(calldate)
+    if not day:
+        return None
+    return f"{day.strftime('%Y/%m/%d')}/{os.path.basename(raw)}"
+
+
+def get_recording_path(file_wav, calldate=None):
+    """Resolve a CDR recording filename to an absolute Path on disk.
+
+    Uses FreePBX's YYYY/MM/DD layout (+ adjacent days as a small fallback).
+    Never recursively lists the recordings tree.
+    """
+    if not file_wav:
+        return None
+
+    root = _recording_root()
+    raw = str(file_wav).strip().replace('\\', '/')
+
+    candidates: list[Path] = []
+
+    if os.path.isabs(raw):
+        candidates.append(Path(raw))
+
+    if '/' in raw.strip('/'):
+        candidates.append(root / raw.lstrip('/'))
+
+    name = os.path.basename(raw)
+    day = _as_date(calldate)
+    if day and name:
+        for offset in (0, -1, 1):
+            d = day + timedelta(days=offset)
+            candidates.append(root / d.strftime('%Y/%m/%d') / name)
+
+    seen: set[str] = set()
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if path.is_file():
+                return path
+        except OSError:
+            continue
     return None
 
 
@@ -369,14 +377,15 @@ def crm_identity_from_cdr(linkedid: str) -> dict:
 
 
 def call_log(limit=None, date=None, date_from=None, date_to=None, allowed_extensions=None,
-             search=None, src=None, dest=None, agent=None, app=None, enrich=True):
+             search=None, src=None, dest=None, agent=None, app=None, enrich=True,
+             resolve_recordings=False):
     """Build normalized call-history rows from the CDR.
 
-    enrich=True (Call History UI) resolves each row's recording path and flags
-    supervision (ChanSpy) legs. Analytics reuses this data source but only needs
-    direction/disposition/duration/talk, so it passes enrich=False to skip the
-    recording lookup and the supervision query — real savings when scanning a
-    whole period with no row limit.
+    enrich=True (Call History UI) flags supervision (ChanSpy) legs.
+    resolve_recordings=False by default: the list API must not touch NFS for every
+    row. The UI builds FreePBX YYYY/MM/DD paths from calldate + recording_file and
+    only hits the filesystem when the user plays a recording.
+    Analytics passes enrich=False to skip supervision as well.
     """
     call_log = get_call_log_from_db(limit=limit, date=date,
                                      date_from=date_from, date_to=date_to,
@@ -387,9 +396,16 @@ def call_log(limit=None, date=None, date_from=None, date_to=None, allowed_extens
     result = []
     for cdr in call_log:
         cdr['call_type'] = classify_cdr_direction(cdr)
-        cdr['extension'] = convert_channel_to_extension(cdr['dstchannel'],cdr['channel'])        
+        cdr['extension'] = convert_channel_to_extension(cdr['dstchannel'],cdr['channel'])
         if enrich and cdr.get('recordingfile'):
-            cdr['recording_path'] = get_recording_path(cdr['recordingfile'])
+            if resolve_recordings:
+                path = get_recording_path(cdr['recordingfile'], cdr.get('calldate'))
+                cdr['recording_path'] = str(path) if path else None
+            else:
+                # Relative YYYY/MM/DD/basename only — no NFS/stat I/O on the list path.
+                cdr['recording_path'] = recording_relpath(
+                    cdr.get('recordingfile'), cdr.get('calldate')
+                )
         else:
             cdr['recording_path'] = None
         
@@ -423,7 +439,7 @@ def call_log(limit=None, date=None, date_from=None, date_to=None, allowed_extens
             'QoS': cdr.get('userfield'),
             'extension': cdr.get('extension'),
             'call_type': cdr.get('call_type'),
-            'recording_path': str(cdr['recording_path']) if cdr.get('recording_path') else None,
+            'recording_path': cdr.get('recording_path'),
             'recording_file': cdr.get('recordingfile') or None,
             'app': cdr.get('call_app'),  
             'call_journey_count':cdr.get('call_journey_count'),
