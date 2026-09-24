@@ -1412,7 +1412,20 @@ def _get_user_scope(user_id: int) -> dict:
         return {"role": "admin", "extension": extension, "monitor_modes": monitor_modes, "allowed_agent_extensions": None, "allowed_queue_names": None}
     if role == "agent":
         agent_exts = [extension] if extension else []
-        return {"role": "agent", "extension": extension, "monitor_modes": [], "allowed_agent_extensions": agent_exts, "allowed_queue_names": []}
+        # Must match /api/agent/login queue resolution. An empty allowed_queue_names
+        # is treated as "filter to no queues" by the WS broadcast — not "no filter" —
+        # so agents previously never received queue_members and the softphone
+        # queue toggle stayed stuck on "Log in" after a successful QueueAdd.
+        queues = get_agent_login_queues(str(extension)) if extension else []
+        if not queues:
+            _agents, queues = get_user_agents_and_queues(user_id)
+        return {
+            "role": "agent",
+            "extension": extension,
+            "monitor_modes": [],
+            "allowed_agent_extensions": agent_exts,
+            "allowed_queue_names": [str(q) for q in (queues or []) if q],
+        }
     agents, queues = get_user_agents_and_queues(user_id)
     return {
         "role": role,
