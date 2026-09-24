@@ -46,7 +46,7 @@ from db_manager import (
     get_agents_list, get_queues_list, sync_agents_from_extensions, sync_queues_from_list,
     set_extension_webrtc, get_extensions_with_webrtc_from_users,get_extension_secret_from_db, set_extension_secret_in_pbx, set_extension_username_in_pbx, set_extension_name_in_pbx,
     register_device_token, delete_device_token, get_device_tokens_for_extension,
-    get_call_vad_from_db,
+    get_call_vad_from_db, get_agent_name_by_extension,
     init_pause_reasons_table, pause_reason_list, pause_reason_create, pause_reason_update, pause_reason_delete,
     init_call_supervision_table,
     init_agent_activity_table,
@@ -2506,6 +2506,22 @@ def _agent_login_queues(current_user: dict) -> list:
     return [str(q) for q in (queues or []) if q]
 
 
+def _queue_member_display_name(ext: str) -> str:
+    """FreePBX/Asterisk MemberName for dynamic queue login (else queue show is bare digits)."""
+    ext = str(ext or "").strip()
+    if not ext:
+        return ext
+    if bridge is not None:
+        cached = (getattr(bridge, "_extension_names", None) or {}).get(ext) or ""
+        if str(cached).strip():
+            return str(cached).strip()
+    opdesk_name = (get_agent_name_by_extension(ext) or "").strip()
+    if opdesk_name:
+        return opdesk_name
+    pbx_name = (get_extension_names_from_db().get(ext) or "").strip()
+    return pbx_name or ext
+
+
 def _agent_live_queues(interface: str) -> list:
     """Queues the interface is *actually* a member of right now, read from the AMI
     live membership cache. Used on logout so we remove exactly what login added,
@@ -2533,9 +2549,10 @@ async def api_agent_login(body: dict = Body(default={}), current_user: dict = De
         raise HTTPException(status_code=400, detail="No queues are assigned to your account")
     interface = normalize_interface(str(ext))
     paused = not bool((body or {}).get("ready", True))
+    membername = await asyncio.to_thread(_queue_member_display_name, str(ext))
     ok_any = False
     for q in queues:
-        success, _msg = await monitor.queue_add(q, interface, 0, str(ext), paused)
+        success, _msg = await monitor.queue_add(q, interface, 0, membername, paused)
         ok_any = ok_any or success
     if ok_any and presence is not None:
         await presence.record_login(str(ext), ready=not paused)
@@ -2980,6 +2997,9 @@ async def handle_client_message(websocket: WebSocket, message: dict):
                 if not _scope_can_access_queue(scope, queue):
                     await manager.send_personal(websocket, {"type": "action_result", "action": "queue_add", "success": False, "message": "Not allowed to manage this queue"})
                 else:
+                    if not (membername or "").strip():
+                        ext_num = interface.split("/")[-1].split("@")[0].split("-")[0]
+                        membername = await asyncio.to_thread(_queue_member_display_name, ext_num)
                     success, msg = await monitor.queue_add(queue, interface, penalty, membername or None, paused)
                     await manager.send_personal(websocket, {
                         "type": "action_result",
