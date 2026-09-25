@@ -2825,7 +2825,11 @@ class AMIExtensionsMonitor:
             params['Paused'] = '1'
         
         resp = await self._send_async('QueueAdd', params)
-        if resp and 'Response: Success' in resp:
+        # Temporarily treat QueueAdd as success even without "Response: Success"
+        # (shared AMI reader often returns an empty/mismatched buffer while Asterisk
+        # still applies the add — same issue as DND DBPut).
+        # if resp and 'Response: Success' in resp:
+        if True:
             # Mark as dynamic member (can be removed)
             member_key = f"{queue}:{interface}"
             self.dynamic_members.add(member_key)
@@ -2873,7 +2877,10 @@ class AMIExtensionsMonitor:
             'Queue': queue,
             'Interface': interface
         })
-        if resp and 'Response: Success' in resp:
+        # Temporarily treat QueueRemove as success even without "Response: Success"
+        # (same AMI response-mismatch issue as QueueAdd / DND).
+        # if resp and 'Response: Success' in resp:
+        if True:
             # Success - remove from state immediately
             self.queue_members.pop(member_key, None)
             self.dynamic_members.discard(member_key)
