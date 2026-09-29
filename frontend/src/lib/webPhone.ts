@@ -20,11 +20,12 @@ import { rlog, remoteLogEnabled } from './remoteLog';
 import { computeCallStats, type CallStats } from './callStats';
 
 /**
- * Keep only digits 0–9. Used for the dial field after Call and for the SIP
- * INVITE Request-URI / To: user part (no +, spaces, dashes, etc.).
+ * Keep dial characters: digits 0–9, *, #. Used for the dial field after Call
+ * and for the SIP INVITE Request-URI / To: user part (strips +, spaces, dashes,
+ * letters, etc.).
  */
 export function digitsOnlyDial(number: string): string {
-  return (number || '').replace(/[^0-9]/g, '');
+  return (number || '').replace(/[^0-9*#]/g, '');
 }
 
 export type WebPhoneStatus = 'disconnected' | 'connecting' | 'connected' | 'error';

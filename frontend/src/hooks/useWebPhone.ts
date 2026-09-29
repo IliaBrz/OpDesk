@@ -292,7 +292,7 @@ export function useWebPhone() {
     const raw = dialNumber.trim() || lastDialedNumber;
     const target = digitsOnlyDial(raw);
     if (!target) return;
-    // Reflect digit-only number in the dial field; INVITE To: uses the same value.
+    // Reflect sanitized dial string (digits/*/#) in the field; INVITE To: uses the same value.
     setDialNumber(target);
     if (target !== lastDialedNumber) {
       setLastDialedNumber(target);
