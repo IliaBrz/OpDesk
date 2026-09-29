@@ -92,6 +92,8 @@ export class WebPhone {
   private stopping: boolean = false;
   private onVisibilityChange: (() => void) | null = null;
   private iceServers: RTCIceServer[];
+  /** Preferred mic mute; survives hangup and applies to the next call's local stream. */
+  private preferredMuted = false;
 
   constructor(callbacks: WebPhoneCallbacks = {}, iceServers?: RTCIceServer[]) {
     this.callbacks = callbacks;
@@ -128,36 +130,42 @@ export class WebPhone {
     return computeCallStats(sdh?.peerConnection);
   }
 
-  /** Mute/unmute the microphone for the current call. Toggles if no argument. */
+  /**
+   * Mute/unmute the microphone. Works idle and in-call: preference is kept when
+   * there is no local stream and applied as soon as getUserMedia succeeds.
+   */
   setMuted(muted: boolean): void {
-    if (!this.localStream) return;
-    const tracks = this.localStream.getAudioTracks();
-    if (tracks.length === 0) return;
-    tracks.forEach((t) => { t.enabled = !muted; });
-    this.callbacks.onMutedChange?.(muted);
-    // Also disable the track on the peer connection senders (same track ref, but ensure no send)
-    const sdh = this.session?.sessionDescriptionHandler as { peerConnection?: RTCPeerConnection };
-    const pc = sdh?.peerConnection;
-    if (pc) {
-      pc.getSenders().forEach((sender) => {
-        if (sender.track && sender.track.kind === 'audio') sender.track.enabled = !muted;
-      });
+    this.preferredMuted = muted;
+    if (this.localStream) {
+      const tracks = this.localStream.getAudioTracks();
+      tracks.forEach((t) => { t.enabled = !muted; });
+      // Same track refs on PC senders; keep enabled in sync.
+      const sdh = this.session?.sessionDescriptionHandler as { peerConnection?: RTCPeerConnection };
+      const pc = sdh?.peerConnection;
+      if (pc) {
+        pc.getSenders().forEach((sender) => {
+          if (sender.track && sender.track.kind === 'audio') sender.track.enabled = !muted;
+        });
+      }
     }
+    this.callbacks.onMutedChange?.(muted);
   }
 
   toggleMute(): boolean {
-    if (!this.localStream) return false;
-    const tracks = this.localStream.getAudioTracks();
-    if (tracks.length === 0) return false;
-    const nextMuted = tracks[0].enabled;
+    const nextMuted = !this.preferredMuted;
     this.setMuted(nextMuted);
     return nextMuted;
   }
 
   get isMuted(): boolean {
-    if (!this.localStream) return false;
-    const tracks = this.localStream.getAudioTracks();
-    return tracks.length > 0 && !tracks[0].enabled;
+    return this.preferredMuted;
+  }
+
+  /** Apply preferredMuted to the current local stream (after getUserMedia). */
+  private applyPreferredMute(): void {
+    if (!this.localStream) return;
+    const muted = this.preferredMuted;
+    this.localStream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
   }
 
   private log(message: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') {
@@ -543,15 +551,40 @@ export class WebPhone {
     this.resetCallState();
   }
 
+  /**
+   * Send DTMF in auto mode: prefer RTP telephone-event (RFC 4733 via
+   * RTCDTMFSender); fall back to SIP INFO (application/dtmf-relay).
+   */
   sendDTMF(digit: string): void {
-    const s = this.session?.sessionDescriptionHandler as { sendDtmf?: (d: string) => void };
-    if (s?.sendDtmf) {
-      try {
-        s.sendDtmf(digit);
-        this.log(`DTMF: ${digit}`, 'info');
-      } catch (e) {
-        this.log(`DTMF error: ${e}`, 'error');
+    if (!this.session || !/^[0-9*#]$/.test(digit)) return;
+
+    const sdh = this.session.sessionDescriptionHandler as {
+      sendDtmf?: (tones: string, options?: { duration?: number; interToneGap?: number }) => boolean;
+    } | undefined;
+
+    try {
+      if (sdh?.sendDtmf && sdh.sendDtmf(digit, { duration: 160, interToneGap: 70 })) {
+        this.log(`DTMF (RTP): ${digit}`, 'info');
+        return;
       }
+    } catch (e) {
+      this.log(`DTMF RTP failed: ${e}`, 'warn');
+    }
+
+    // Fallback: SIP INFO
+    try {
+      void this.session.info({
+        requestOptions: {
+          body: {
+            contentDisposition: 'render',
+            contentType: 'application/dtmf-relay',
+            content: `Signal=${digit}\r\nDuration=160`,
+          },
+        },
+      });
+      this.log(`DTMF (INFO): ${digit}`, 'info');
+    } catch (e) {
+      this.log(`DTMF error: ${e}`, 'error');
     }
   }
 
@@ -582,6 +615,8 @@ export class WebPhone {
       this.localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      this.applyPreferredMute();
+      this.callbacks.onLocalStream?.(this.localStream);
     } catch (e) {
       this.log('Microphone access denied', 'error');
       this.setCallStatus('Error');
@@ -634,6 +669,7 @@ export class WebPhone {
             this.setCallStatus(`In call with ${dial}`);
             this.startCallTimer();
             this.setupRemoteMedia(inviter, onRemoteStream);
+            this.applyPreferredMute();
             if (this.localStream) this.callbacks.onLocalStream?.(this.localStream);
             break;
           case SessionState.Terminated:
@@ -666,6 +702,8 @@ export class WebPhone {
       this.localStream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
       });
+      this.applyPreferredMute();
+      this.callbacks.onLocalStream?.(this.localStream);
     } catch {
       invitation.reject();
       this.resetCallState();
@@ -694,6 +732,7 @@ export class WebPhone {
         this.setCallStatus('In call');
         this.startCallTimer();
         if (onRemoteStream) this.setupRemoteMedia(invitation, onRemoteStream);
+        this.applyPreferredMute();
         if (this.localStream) this.callbacks.onLocalStream?.(this.localStream);
       } else if (state === SessionState.Terminated) {
         this.resetCallState();

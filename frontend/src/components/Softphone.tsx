@@ -84,12 +84,24 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
   const [transferDest, setTransferDest] = useState('');
   const { micLevel, speakerLevel } = useAudioLevels(localStream, remoteStream);
 
+  const inCall = isCallAnswered || isOutgoingRinging || hasActiveCall;
+  const inCallNumber =
+    activeCallRemoteNumber ||
+    (callStatus.startsWith('In call with ') ? callStatus.slice('In call with '.length) : '') ||
+    (isOutgoingRinging ? dialNumber : '');
+  const inCallName =
+    activeCallRemoteName ||
+    (isOutgoingRinging ? t('softphone.status.connecting') : '') ||
+    (isCallAnswered ? t('softphone.incomingCall') : '');
+  const inCallDuration = callDuration || '00:00';
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
 
     if (e.key === 'Enter') {
       e.preventDefault();
-      makeCall();
+      if (inCall) hangup();
+      else makeCall();
       return;
     }
 
@@ -114,7 +126,7 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
           ? t('softphone.status.error')
           : t('softphone.status.notRegistered');
 
-  // Incoming call screen
+  // Incoming call screen (answer/decline only)
   if (incomingCall) {
     return (
       <div className="softphone-panel softphone-incoming">
@@ -162,27 +174,23 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
     );
   }
 
-  // In-call view
-  const inCallNumber =
-    activeCallRemoteNumber ||
-    (callStatus.startsWith('In call with ') ? callStatus.slice('In call with '.length) : '') ||
-    (isOutgoingRinging ? dialNumber : '');
-  const inCallName = activeCallRemoteName || (isOutgoingRinging ? t('softphone.status.connecting') : t('softphone.incomingCall'));
-  const inCallDuration = callDuration || '00:00';
+  // Unified idle + in-call layout (same dialpad; DTMF while in call via addDigit)
+  return (
+    <div className={`softphone-panel${inCall ? ' softphone-incall' : ''}`}>
+      <AgentStatusHeader
+        title={t('softphone.title')}
+        icon={<Phone size={18} className="softphone-header-icon" />}
+        isConnected={isConnected}
+        presence={presence}
+        onCall={hasActiveCall}
+        onRefresh={refetchConfig}
+        refreshDisabled={configLoading}
+      />
 
-  if (isCallAnswered || isOutgoingRinging) {
-    return (
-      <div className="softphone-panel softphone-incall">
-        <AgentStatusHeader
-          title={t('softphone.title')}
-          icon={<Phone size={18} className="softphone-header-icon" />}
-          isConnected={isConnected}
-          presence={presence}
-          onCall={hasActiveCall}
-        />
-        <div className="softphone-incall-body">
+      {inCall && (
+        <div className="softphone-call-banner">
           <CopyablePhone className="softphone-incall-number" value={inCallNumber || null} />
-          <div className="softphone-incall-name">{inCallName}</div>
+          {inCallName && <div className="softphone-incall-name">{inCallName}</div>}
           <div className="softphone-incall-duration">{inCallDuration}</div>
           {isCallAnswered && callStats && callStats.mos != null && (() => {
             const sig = mosSignal(callStats.mos);
@@ -222,99 +230,8 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
               </div>
             </div>
           </div>
-          <div className="softphone-incall-grid">
-            <button
-              type="button"
-              className={`softphone-incall-btn ${isOnHold ? 'softphone-incall-btn-active' : ''}`}
-              title={isOnHold ? t('softphone.resume') : t('softphone.hold')}
-              onClick={toggleHold}
-            >
-              <Pause size={22} />
-              <span>{isOnHold ? t('softphone.resume') : t('softphone.hold')}</span>
-            </button>
-            <button
-              type="button"
-              className={`softphone-incall-btn ${isMuted ? 'softphone-incall-btn-active' : ''}`}
-              onClick={toggleMute}
-              title={isMuted ? t('softphone.unmute') : t('softphone.mute')}
-            >
-              {isMuted ? <Mic size={22} /> : <MicOff size={22} />}
-              <span>{isMuted ? t('softphone.unmute') : t('softphone.mute')}</span>
-            </button>
-            <button
-              type="button"
-              className="softphone-incall-btn"
-              title={t('softphone.transfer')}
-              onClick={() => setShowTransfer((prev) => !prev)}
-            >
-              <ArrowRightLeft size={22} />
-              <span>{t('softphone.transfer')}</span>
-            </button>
-          </div>
-          {showTransfer && (
-            <div className="softphone-transfer">
-              <span className="softphone-transfer-label">
-                {t('softphone.transferToExtension')}
-              </span>
-              <input
-                type="text"
-                value={transferDest}
-                onChange={(e) => setTransferDest(e.target.value)}
-                placeholder={t('softphone.transferPlaceholder')}
-                className="form-input softphone-transfer-input"
-              />
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={!transferDest.trim()}
-                onClick={() => {
-                  const dest = transferDest.trim();
-                  if (!dest) return;
-                  transfer(dest);
-                  setShowTransfer(false);
-                  setTransferDest('');
-                }}
-              >
-                {t('softphone.transfer')}
-              </button>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => {
-                  setShowTransfer(false);
-                  setTransferDest('');
-                }}
-              >
-                {t('softphone.cancel')}
-              </button>
-            </div>
-          )}
-          <button
-            type="button"
-            className="softphone-btn-hangup"
-            onClick={hangup}
-            title={t('softphone.endCall')}
-          >
-            <PhoneOff size={24} />
-          </button>
         </div>
-        <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
-      </div>
-    );
-  }
-
-  // Dialpad view
-  return (
-    <div className="softphone-panel">
-      <AgentStatusHeader
-        title={t('softphone.title')}
-        icon={<Phone size={18} className="softphone-header-icon" />}
-        isConnected={isConnected}
-        presence={presence}
-        onCall={hasActiveCall}
-        onRefresh={refetchConfig}
-        refreshDisabled={configLoading}
-      />
+      )}
 
       <div className="softphone-dial-area">
         <div className="softphone-search-wrap">
@@ -350,15 +267,86 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
           ))}
         </div>
 
+        {isCallAnswered && (
+          <div className="softphone-incall-grid softphone-incall-grid--compact">
+            <button
+              type="button"
+              className={`softphone-incall-btn ${isOnHold ? 'softphone-incall-btn-active' : ''}`}
+              title={isOnHold ? t('softphone.resume') : t('softphone.hold')}
+              onClick={toggleHold}
+            >
+              <Pause size={20} />
+              <span>{isOnHold ? t('softphone.resume') : t('softphone.hold')}</span>
+            </button>
+            <button
+              type="button"
+              className="softphone-incall-btn"
+              title={t('softphone.transfer')}
+              onClick={() => setShowTransfer((prev) => !prev)}
+            >
+              <ArrowRightLeft size={20} />
+              <span>{t('softphone.transfer')}</span>
+            </button>
+          </div>
+        )}
+
+        {showTransfer && isCallAnswered && (
+          <div className="softphone-transfer">
+            <span className="softphone-transfer-label">
+              {t('softphone.transferToExtension')}
+            </span>
+            <input
+              type="text"
+              value={transferDest}
+              onChange={(e) => setTransferDest(e.target.value)}
+              placeholder={t('softphone.transferPlaceholder')}
+              className="form-input softphone-transfer-input"
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!transferDest.trim()}
+              onClick={() => {
+                const dest = transferDest.trim();
+                if (!dest) return;
+                transfer(dest);
+                setShowTransfer(false);
+                setTransferDest('');
+              }}
+            >
+              {t('softphone.transfer')}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => {
+                setShowTransfer(false);
+                setTransferDest('');
+              }}
+            >
+              {t('softphone.cancel')}
+            </button>
+          </div>
+        )}
+
         <div className="softphone-bottom-actions">
           <button
             type="button"
-            className="softphone-bottom-btn softphone-call-btn"
-            onClick={hasActiveCall ? hangup : makeCall}
-            disabled={!isConnected || (!hasActiveCall && !dialNumber.trim() && !lastDialedNumber)}
-            title={hasActiveCall ? t('softphone.endCall') : t('softphone.answer')}
+            className={`softphone-bottom-btn ${isMuted ? 'softphone-bottom-btn-active' : ''}`}
+            onClick={toggleMute}
+            disabled={!isConnected}
+            title={isMuted ? t('softphone.unmute') : t('softphone.mute')}
           >
-            <Phone size={26} />
+            {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+          </button>
+          <button
+            type="button"
+            className={`softphone-bottom-btn ${inCall ? 'softphone-hangup-btn' : 'softphone-call-btn'}`}
+            onClick={inCall ? hangup : makeCall}
+            disabled={!isConnected || (!inCall && !dialNumber.trim() && !lastDialedNumber)}
+            title={inCall ? t('softphone.endCall') : t('softphone.answer')}
+          >
+            {inCall ? <PhoneOff size={26} /> : <Phone size={26} />}
           </button>
           <button
             type="button"
@@ -399,8 +387,8 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
           Set your <strong>extension</strong> and <strong>extension secret</strong> (configured by an administrator).
         </p>
       )}
-      {/* Call status & duration */}
-      {(callStatus || callDuration) && (
+      {/* Call status (idle hints only — banner covers in-call) */}
+      {!inCall && (callStatus || callDuration) && (
         <div className="softphone-call-status">
           <span>{callStatus}</span>
           {callDuration && <span className="softphone-duration">{callDuration}</span>}

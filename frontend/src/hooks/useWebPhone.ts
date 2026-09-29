@@ -68,6 +68,7 @@ export function useWebPhone() {
   const autoAnswerRef = useRef(autoAnswer);
   const autoAnswerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unlockRemoteAudioRef = useRef<(() => void) | null>(null);
+  const isMutedRef = useRef(isMuted);
   // Tracks the current status synchronously so connect() can guard against
   // interrupting a SIP.js transport reconnect that's already in progress.
   const statusRef = useRef<WebPhoneStatus>('disconnected');
@@ -123,6 +124,7 @@ export function useWebPhone() {
   // Keep statusRef in sync so connect() can read the current status synchronously
   // without stale-closure issues (statusRef is updated before App.tsx effects run).
   useEffect(() => { statusRef.current = status; }, [status]);
+  useEffect(() => { isMutedRef.current = isMuted; }, [isMuted]);
   useEffect(() => { autoAnswerRef.current = autoAnswer; }, [autoAnswer]);
 
   const setAutoAnswer = useCallback((on: boolean) => {
@@ -250,6 +252,8 @@ export function useWebPhone() {
       phoneRef.current = null;
     }
     const phone = new WebPhone(callbacks, config.iceServers);
+    // Restore mute preference after reconnect (WebPhone starts unmuted).
+    if (isMutedRef.current) phone.setMuted(true);
     phoneRef.current = phone;
     setRemoteStream(null);
     setLogs((prev) => [...prev, { message: 'Connecting...', type: 'info', time: new Date().toLocaleTimeString() }]);
@@ -312,11 +316,17 @@ export function useWebPhone() {
     phoneRef.current?.hangup();
     setRemoteStream(null);
     setLocalStream(null);
-    setIsMuted(false);
+    // Keep isMuted — mute preference persists across calls (idle + next call).
   }, []);
 
   const toggleMute = useCallback(() => {
-    phoneRef.current?.toggleMute();
+    const phone = phoneRef.current;
+    if (phone) {
+      phone.toggleMute();
+      return;
+    }
+    // Softphone not connected yet: still flip local mute preference for UI.
+    setIsMuted((prev) => !prev);
   }, []);
 
   const holdMutedRef = useRef(false);
