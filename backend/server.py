@@ -4038,15 +4038,45 @@ async def internal_blacklist_check(
 @app.get("/api/blacklist")
 async def api_list_blacklist(
     q: str = "",
+    comment: str = "",
+    reason: str = "",
+    date_from: str = "",
+    date_to: str = "",
     page: int = 1,
     page_size: int = 25,
     current_user: dict = Depends(require_supervisor_or_admin),
 ):
-    """List blacklist entries (supervisor/admin). Paginated; optional ?q= number substring."""
+    """List blacklist entries (supervisor/admin). Paginated; filters AND-combined.
+
+    Query params:
+      q         — number digits substring
+      comment   — comment substring
+      reason    — spam|children|hooligan|security
+      date_from / date_to — inclusive YYYY-MM-DD on created_at
+    """
     q_digits = re.sub(r'\D', '', (q or '').strip()) or None
+    comment_q = (comment or '').strip() or None
+    reason_q = (reason or '').strip().lower() or None
+    if reason_q and reason_q not in BLACKLIST_REASONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"reason must be one of: {', '.join(BLACKLIST_REASONS)}",
+        )
+    df = (date_from or '').strip() or None
+    dt = (date_to or '').strip() or None
+    for label, val in (('date_from', df), ('date_to', dt)):
+        if val:
+            try:
+                datetime.strptime(val, '%Y-%m-%d')
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid {label}; use YYYY-MM-DD")
+    if df and dt and df > dt:
+        raise HTTPException(status_code=400, detail="date_from must be on or before date_to")
     page = max(1, int(page or 1))
     page_size = max(1, min(200, int(page_size or 25)))
-    rows, total = await asyncio.to_thread(list_blacklist, q_digits, page, page_size)
+    rows, total = await asyncio.to_thread(
+        list_blacklist, q_digits, comment_q, reason_q, df, dt, page, page_size,
+    )
     return {
         "items": rows,
         "total": total,

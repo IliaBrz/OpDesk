@@ -3421,11 +3421,23 @@ def _blacklist_row_to_dict(row: dict) -> dict:
 
 def list_blacklist(
     number_q: Optional[str] = None,
+    comment_q: Optional[str] = None,
+    reason: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     page: int = 1,
     page_size: int = 25,
 ) -> Tuple[list, int]:
     """Blacklist rows with total count. Unreviewed first, then newest id.
-    Returns (page_rows, total)."""
+
+    All provided filters are AND-combined:
+      number_q  — digits substring of ``number``
+      comment_q — case-insensitive substring of ``comment``
+      reason    — exact ENUM match
+      date_from / date_to — inclusive calendar days on ``created_at`` (YYYY-MM-DD)
+
+    Returns (page_rows, total).
+    """
     page = max(1, int(page or 1))
     page_size = max(1, min(200, int(page_size or 25)))
     offset = (page - 1) * page_size
@@ -3435,11 +3447,25 @@ def list_blacklist(
     try:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor(dictionary=True)
-        where = ""
+        clauses: list = []
         params: list = []
         if number_q:
-            where = "WHERE b.number LIKE %s "
+            clauses.append("b.number LIKE %s")
             params.append(f"%{number_q}%")
+        if comment_q:
+            clauses.append("b.comment LIKE %s")
+            params.append(f"%{comment_q}%")
+        if reason:
+            clauses.append("b.reason = %s")
+            params.append(reason)
+        if date_from:
+            clauses.append("b.created_at >= %s")
+            params.append(f"{date_from} 00:00:00")
+        if date_to:
+            # Inclusive end-of-day: created_at < next calendar day
+            clauses.append("b.created_at < DATE_ADD(%s, INTERVAL 1 DAY)")
+            params.append(date_to)
+        where = ("WHERE " + " AND ".join(clauses) + " ") if clauses else ""
         cursor.execute(f"SELECT COUNT(*) AS cnt FROM blacklist b {where}", params)
         total = int((cursor.fetchone() or {}).get('cnt') or 0)
         sql = (

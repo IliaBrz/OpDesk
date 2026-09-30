@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, Edit2, Trash2, Ban, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchWithAuth } from '../auth';
-import { Modal, Toggle, FormSection, FormRow, FormField, SearchInput } from './ui';
+import { Modal, Toggle, FormSection, FormRow, FormField, SearchInput, Toolbar, type ToolbarFilter } from './ui';
+import { FilterSelect } from './FilterSelect';
 import { raiseFor } from '../lib/api';
 
 export type BlacklistReason = 'spam' | 'children' | 'hooligan' | 'security';
@@ -83,6 +84,7 @@ function formFromEntry(e: BlacklistEntry): EntryForm {
 /**
  * Supervisor/Admin CRUD for the custom phone blacklist.
  * Server-side pagination (25/page), Call History–style controls.
+ * Filters (number / comment / reason / created date range) are AND-combined.
  */
 export function BlacklistPanel() {
   const { t } = useTranslation();
@@ -90,6 +92,10 @@ export function BlacklistPanel() {
   const [total, setTotal] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [commentFilter, setCommentFilter] = useState('');
+  const [reasonFilter, setReasonFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [modal, setModal] = useState<'create' | 'edit' | 'review' | null>(null);
   const [editing, setEditing] = useState<BlacklistEntry | null>(null);
   const [form, setForm] = useState<EntryForm>(blankForm());
@@ -102,13 +108,24 @@ export function BlacklistPanel() {
   const startIdx = total === 0 ? 0 : (safeCurrentPage - 1) * ITEMS_PER_PAGE;
   const endIdx = total === 0 ? 0 : Math.min(startIdx + items.length, total);
 
-  const load = useCallback(async (q: string | undefined, page: number) => {
+  const filtersKey = useMemo(
+    () => [search, commentFilter, reasonFilter, dateFrom, dateTo].join('\0'),
+    [search, commentFilter, reasonFilter, dateFrom, dateTo],
+  );
+
+  const load = useCallback(async (page: number) => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
       params.set('page', String(page));
       params.set('page_size', String(ITEMS_PER_PAGE));
-      if (q) params.set('q', q);
+      const num = digitsOnly(search);
+      if (num) params.set('q', num);
+      const cmt = commentFilter.trim();
+      if (cmt) params.set('comment', cmt);
+      if (reasonFilter) params.set('reason', reasonFilter);
+      if (dateFrom) params.set('date_from', dateFrom);
+      if (dateTo) params.set('date_to', dateTo);
       const res = await fetchWithAuth(`/api/blacklist?${params.toString()}`);
       if (!res.ok) await raiseFor(res);
       const data = await res.json();
@@ -119,20 +136,27 @@ export function BlacklistPanel() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [search, commentFilter, reasonFilter, dateFrom, dateTo]);
 
   useEffect(() => {
-    load(digitsOnly(search) || undefined, safeCurrentPage);
-  }, [load, search, safeCurrentPage]);
+    load(safeCurrentPage);
+  }, [load, safeCurrentPage, filtersKey]);
+
+  const resetPage = useCallback(() => setCurrentPage(1), []);
 
   const onSearch = useCallback((q: string) => {
     setSearch(q);
-    setCurrentPage(1);
-  }, []);
+    resetPage();
+  }, [resetPage]);
+
+  const onComment = useCallback((q: string) => {
+    setCommentFilter(q);
+    resetPage();
+  }, [resetPage]);
 
   const reload = useCallback(() => {
-    load(digitsOnly(search) || undefined, safeCurrentPage);
-  }, [load, search, safeCurrentPage]);
+    load(safeCurrentPage);
+  }, [load, safeCurrentPage]);
 
   const openCreate = () => {
     setForm(blankForm());
@@ -235,6 +259,73 @@ export function BlacklistPanel() {
 
   const reasonLabel = (r: BlacklistReason) => t(`blacklist.reasons.${r}`, r);
 
+  const toolbarFilters: ToolbarFilter[] = [
+    {
+      key: 'comment',
+      label: t('blacklist.col.comment', 'Comment'),
+      active: Boolean(commentFilter.trim()),
+      control: (
+        <SearchInput
+          value={commentFilter}
+          onChange={onComment}
+          label={t('blacklist.col.comment', 'Comment')}
+          placeholder={t('blacklist.filterCommentPlaceholder', 'Comment…')}
+          urlSync={false}
+        />
+      ),
+    },
+    {
+      key: 'reason',
+      label: t('blacklist.col.reason', 'Reason'),
+      active: Boolean(reasonFilter),
+      control: (
+        <FilterSelect
+          value={reasonFilter}
+          onChange={(v) => { setReasonFilter(v); resetPage(); }}
+          size="md"
+          options={[
+            { value: '', label: t('blacklist.allReasons', 'All reasons') },
+            ...REASONS.map((r) => ({ value: r, label: reasonLabel(r) })),
+          ]}
+        />
+      ),
+    },
+    {
+      key: 'date_from',
+      label: t('blacklist.dateFrom', 'Created from'),
+      active: Boolean(dateFrom),
+      control: (
+        <input
+          type="date"
+          className="form-input"
+          dir="ltr"
+          value={dateFrom}
+          max={dateTo || undefined}
+          onChange={(e) => { setDateFrom(e.target.value); resetPage(); }}
+          aria-label={t('blacklist.dateFrom', 'Created from')}
+          title={t('blacklist.dateFrom', 'Created from')}
+        />
+      ),
+    },
+    {
+      key: 'date_to',
+      label: t('blacklist.dateTo', 'Created to'),
+      active: Boolean(dateTo),
+      control: (
+        <input
+          type="date"
+          className="form-input"
+          dir="ltr"
+          value={dateTo}
+          min={dateFrom || undefined}
+          onChange={(e) => { setDateTo(e.target.value); resetPage(); }}
+          aria-label={t('blacklist.dateTo', 'Created to')}
+          title={t('blacklist.dateTo', 'Created to')}
+        />
+      ),
+    },
+  ];
+
   const modalTitle =
     modal === 'create'
       ? t('blacklist.addTitle', 'Add to blacklist')
@@ -251,11 +342,13 @@ export function BlacklistPanel() {
         </h2>
       </div>
       <div className="panel-content">
-      <div className="notes-toolbar" style={{ flexWrap: 'wrap', gap: 12 }}>
-        <span className="panel-subtitle">
-          {t('blacklist.subtitle', 'Blocked numbers for inbound/outbound calls. Unreviewed entries appear first.')}
-        </span>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginInlineStart: 'auto' }}>
+      <p className="panel-subtitle" style={{ marginBottom: 12 }}>
+        {t('blacklist.subtitle', 'Blocked numbers for inbound/outbound calls. Unreviewed entries appear first.')}
+      </p>
+
+      <Toolbar
+        filtersLabel={t('blacklist.filters', 'Filters')}
+        search={
           <SearchInput
             value={search}
             onChange={onSearch}
@@ -263,11 +356,14 @@ export function BlacklistPanel() {
             placeholder={t('blacklist.searchPlaceholder', 'Number…')}
             urlSync={false}
           />
-          <button type="button" className="btn btn-primary notes-toolbar-action" onClick={openCreate}>
+        }
+        filters={toolbarFilters}
+        actions={[
+          <button key="add" type="button" className="btn btn-primary" onClick={openCreate}>
             <Plus size={14} /> {t('blacklist.add', 'Add')}
-          </button>
-        </div>
-      </div>
+          </button>,
+        ]}
+      />
 
       <div className="settings-users-table-wrap">
         <table className="settings-users-table">
