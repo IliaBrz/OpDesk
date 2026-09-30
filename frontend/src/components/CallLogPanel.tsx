@@ -54,7 +54,7 @@ function formatCallDate(dateStr: string, t: TFunction): { date: string; time: st
   }
 
   const timeLabel = d.toLocaleTimeString(undefined, {
-    hour: '2-digit', minute: '2-digit', hour12: false
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
   });
 
   return { date: dateLabel, time: timeLabel };
