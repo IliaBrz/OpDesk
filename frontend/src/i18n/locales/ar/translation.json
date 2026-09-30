@@ -23,7 +23,8 @@
     "openMenu": "فتح القائمة",
     "closeMenu": "إغلاق القائمة",
     "logs": "السجلات",
-    "contacts": "جهات الاتصال"
+    "contacts": "جهات الاتصال",
+    "blacklist": "القائمة السوداء"
   },
   "header": {
     "softphoneRegistered": "الهاتف (مسجّل)",
@@ -904,5 +905,54 @@
     "sourceManual": "يدوي",
     "sourceCrm": "CRM",
     "call": "اتصال بـ {{name}}"
+  },
+  "blacklist": {
+    "subtitle": "الأرقام المحظورة للمكالمات الواردة/الصادرة. غير المراجعة أولاً.",
+    "add": "إضافة",
+    "addTitle": "إضافة إلى القائمة السوداء",
+    "editTitle": "تعديل القيد",
+    "reviewTitle": "مراجعة القيد",
+    "searchLabel": "بحث بالرقم",
+    "searchPlaceholder": "رقم…",
+    "loading": "جارٍ التحميل…",
+    "none": "لا توجد قيود",
+    "pending": "قيد المراجعة",
+    "inbound": "وارد",
+    "outbound": "صادر",
+    "blockInbound": "حظر الوارد",
+    "blockOutbound": "حظر الصادر",
+    "direction": "الاتجاه",
+    "basic": "القيد",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "saving": "جارٍ الحفظ…",
+    "saveFailed": "فشل الحفظ",
+    "edit": "تعديل",
+    "delete": "حذف",
+    "review": "مراجعة",
+    "confirmDelete": "حذف حظر {{number}}؟",
+    "block": "حظر",
+    "blockTitle": "حظر الرقم",
+    "blockDescription": "حظر هذا المتصل لمدة 24 ساعة (وارد). يمكن للمشرف المراجعة لاحقاً.",
+    "blockFailed": "تعذر حظر الرقم",
+    "blocking": "جارٍ الحظر…",
+    "col": {
+      "id": "المعرف",
+      "number": "الرقم",
+      "reason": "السبب",
+      "direction": "الاتجاه",
+      "created": "أُنشئ",
+      "reviewed": "روجع",
+      "unblock": "رفع الحظر",
+      "creator": "المنشئ",
+      "reviewer": "المراجع",
+      "actions": "إجراءات"
+    },
+    "reasons": {
+      "spam": "رسائل مزعجة",
+      "children": "أطفال",
+      "hooligan": "شغب",
+      "security": "أمن"
+    }
   }
 }

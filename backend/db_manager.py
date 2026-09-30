@@ -3345,3 +3345,317 @@ def get_contacts_for_resolver() -> list:
         return []
     finally:
         _safe_close(cursor, conn)
+
+
+# ---------------------------------------------------------------------------
+# Blacklist (custom phone block list; see schema.sql)
+# ---------------------------------------------------------------------------
+BLACKLIST_REASONS = ('spam', 'children', 'hooligan', 'security')
+
+
+def init_blacklist_table() -> None:
+    """Create the blacklist table (if missing). Idempotent; called at startup."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS blacklist (
+                id           INT AUTO_INCREMENT PRIMARY KEY,
+                number       VARCHAR(15) NOT NULL,
+                reason       ENUM('spam','children','hooligan','security') NOT NULL,
+                inbound      TINYINT(1) NOT NULL DEFAULT 1,
+                outbound     TINYINT(1) NOT NULL DEFAULT 0,
+                creator_id   INT NOT NULL,
+                reviewer_id  INT NULL,
+                created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                reviewed_at  TIMESTAMP NULL DEFAULT NULL,
+                unblock_at   TIMESTAMP NOT NULL,
+                INDEX idx_number (number),
+                INDEX idx_unblock_at (unblock_at),
+                INDEX idx_reviewed_at (reviewed_at),
+                INDEX idx_active_number (number, unblock_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+        """)
+        conn.commit()
+    except Error as e:
+        log.warning(f"⚠️  Database error init_blacklist_table: {e}")
+    finally:
+        _safe_close(cursor, conn)
+
+
+def _blacklist_row_to_dict(row: dict) -> dict:
+    """Normalize a blacklist DB row for JSON (datetimes → ISO, bools, usernames)."""
+    if not row:
+        return row
+    out = dict(row)
+    for key in ('created_at', 'reviewed_at', 'unblock_at'):
+        val = out.get(key)
+        if val is not None and hasattr(val, 'isoformat'):
+            out[key] = val.isoformat(sep=' ', timespec='seconds')
+    out['inbound'] = bool(out.get('inbound'))
+    out['outbound'] = bool(out.get('outbound'))
+    return out
+
+
+def list_blacklist(number_q: Optional[str] = None) -> list:
+    """Active + pending blacklist rows. Unreviewed first, then newest id."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor(dictionary=True)
+        sql = (
+            "SELECT b.id, b.number, b.reason, b.inbound, b.outbound, "
+            "b.creator_id, b.reviewer_id, b.created_at, b.reviewed_at, b.unblock_at, "
+            "cu.username AS creator_username, ru.username AS reviewer_username "
+            "FROM blacklist b "
+            "LEFT JOIN users cu ON cu.id = b.creator_id "
+            "LEFT JOIN users ru ON ru.id = b.reviewer_id "
+        )
+        params: list = []
+        if number_q:
+            sql += "WHERE b.number LIKE %s "
+            params.append(f"%{number_q}%")
+        sql += (
+            "ORDER BY (b.reviewed_at IS NULL) DESC, b.id DESC"
+        )
+        cursor.execute(sql, params)
+        return [_blacklist_row_to_dict(r) for r in (cursor.fetchall() or [])]
+    except Error as e:
+        log.warning(f"⚠️  Database error list_blacklist: {e}")
+        return []
+    finally:
+        _safe_close(cursor, conn)
+
+
+def get_blacklist_entry(entry_id: int) -> Optional[dict]:
+    """Single blacklist row by id, or None."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT b.id, b.number, b.reason, b.inbound, b.outbound, "
+            "b.creator_id, b.reviewer_id, b.created_at, b.reviewed_at, b.unblock_at, "
+            "cu.username AS creator_username, ru.username AS reviewer_username "
+            "FROM blacklist b "
+            "LEFT JOIN users cu ON cu.id = b.creator_id "
+            "LEFT JOIN users ru ON ru.id = b.reviewer_id "
+            "WHERE b.id=%s",
+            (entry_id,),
+        )
+        row = cursor.fetchone()
+        return _blacklist_row_to_dict(row) if row else None
+    except Error as e:
+        log.warning(f"⚠️  Database error get_blacklist_entry: {e}")
+        return None
+    finally:
+        _safe_close(cursor, conn)
+
+
+def find_active_blacklist(number: str) -> Optional[dict]:
+    """Return an active (unblock_at > NOW()) row for this number, if any."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT id, number, reason, inbound, outbound, unblock_at "
+            "FROM blacklist WHERE number=%s AND unblock_at > NOW() "
+            "ORDER BY id DESC LIMIT 1",
+            (number,),
+        )
+        row = cursor.fetchone()
+        return _blacklist_row_to_dict(row) if row else None
+    except Error as e:
+        log.warning(f"⚠️  Database error find_active_blacklist: {e}")
+        return None
+    finally:
+        _safe_close(cursor, conn)
+
+
+def is_number_blocked(number: str, direction: str) -> bool:
+    """True when an active row blocks this number for inbound or outbound."""
+    if direction not in ('inbound', 'outbound'):
+        return False
+    col = 'inbound' if direction == 'inbound' else 'outbound'
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT 1 FROM blacklist WHERE number=%s AND unblock_at > NOW() AND `{col}`=1 LIMIT 1",
+            (number,),
+        )
+        return cursor.fetchone() is not None
+    except Error as e:
+        log.warning(f"⚠️  Database error is_number_blocked: {e}")
+        return False
+    finally:
+        _safe_close(cursor, conn)
+
+
+def create_blacklist_entry(
+    number: str,
+    reason: str,
+    inbound: bool,
+    outbound: bool,
+    creator_id: int,
+    unblock_at: str,
+) -> Optional[int]:
+    """Insert a blacklist row. Returns new id, or None on error.
+    Caller must ensure no active duplicate exists."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        # Drop any already-expired rows for this number so the table stays clean
+        # even if the prune cron has not run yet.
+        cursor.execute(
+            "DELETE FROM blacklist WHERE number=%s AND unblock_at <= NOW()",
+            (number,),
+        )
+        cursor.execute(
+            "INSERT INTO blacklist (number, reason, inbound, outbound, creator_id, unblock_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s)",
+            (number, reason, 1 if inbound else 0, 1 if outbound else 0, creator_id, unblock_at),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    except Error as e:
+        log.warning(f"⚠️  Database error create_blacklist_entry: {e}")
+        return None
+    finally:
+        _safe_close(cursor, conn)
+
+
+def update_blacklist_entry(
+    entry_id: int,
+    *,
+    number: Optional[str] = None,
+    reason: Optional[str] = None,
+    inbound: Optional[bool] = None,
+    outbound: Optional[bool] = None,
+    unblock_at: Optional[str] = None,
+) -> bool:
+    """Partial update of editable fields. True when the row exists."""
+    fields = []
+    params: list = []
+    if number is not None:
+        fields.append("number=%s")
+        params.append(number)
+    if reason is not None:
+        fields.append("reason=%s")
+        params.append(reason)
+    if inbound is not None:
+        fields.append("inbound=%s")
+        params.append(1 if inbound else 0)
+    if outbound is not None:
+        fields.append("outbound=%s")
+        params.append(1 if outbound else 0)
+    if unblock_at is not None:
+        fields.append("unblock_at=%s")
+        params.append(unblock_at)
+    if not fields:
+        return True
+    params.append(entry_id)
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE blacklist SET {', '.join(fields)} WHERE id=%s",
+            params,
+        )
+        conn.commit()
+        if cursor.rowcount == 0:
+            cursor.execute("SELECT 1 FROM blacklist WHERE id=%s", (entry_id,))
+            return cursor.fetchone() is not None
+        return True
+    except Error as e:
+        log.warning(f"⚠️  Database error update_blacklist_entry: {e}")
+        return False
+    finally:
+        _safe_close(cursor, conn)
+
+
+def review_blacklist_entry(
+    entry_id: int,
+    reviewer_id: int,
+    reason: str,
+    inbound: bool,
+    outbound: bool,
+    unblock_at: str,
+) -> bool:
+    """Apply review edits and stamp reviewer_id + reviewed_at=NOW()."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE blacklist SET reason=%s, inbound=%s, outbound=%s, unblock_at=%s, "
+            "reviewer_id=%s, reviewed_at=NOW() WHERE id=%s",
+            (reason, 1 if inbound else 0, 1 if outbound else 0, unblock_at, reviewer_id, entry_id),
+        )
+        conn.commit()
+        if (cursor.rowcount or 0) > 0:
+            return True
+        cursor.execute("SELECT 1 FROM blacklist WHERE id=%s", (entry_id,))
+        return cursor.fetchone() is not None
+    except Error as e:
+        log.warning(f"⚠️  Database error review_blacklist_entry: {e}")
+        return False
+    finally:
+        _safe_close(cursor, conn)
+
+
+def delete_blacklist_entry(entry_id: int) -> bool:
+    """Hard-delete a blacklist row. True when a row was removed."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM blacklist WHERE id=%s", (entry_id,))
+        conn.commit()
+        return (cursor.rowcount or 0) > 0
+    except Error as e:
+        log.warning(f"⚠️  Database error delete_blacklist_entry: {e}")
+        return False
+    finally:
+        _safe_close(cursor, conn)
+
+
+def prune_expired_blacklist() -> int:
+    """DELETE rows whose unblock_at has passed. Returns number of deleted rows."""
+    config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
+    conn = None
+    cursor = None
+    try:
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM blacklist WHERE unblock_at <= NOW()")
+        conn.commit()
+        return cursor.rowcount or 0
+    except Error as e:
+        log.warning(f"⚠️  Database error prune_expired_blacklist: {e}")
+        return 0
+    finally:
+        _safe_close(cursor, conn)

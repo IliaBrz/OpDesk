@@ -16,6 +16,7 @@ import {
   SignalMedium,
   SignalLow,
   SignalZero,
+  Ban,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -23,6 +24,7 @@ import { useWebPhoneContext } from '../contexts/WebPhoneContext';
 import { useAudioLevels } from '../hooks/useAudioLevels';
 import { CopyablePhone } from './CopyablePhone';
 import { AgentStatusHeader } from './AgentStatusHeader';
+import { BlockCallModal } from './BlockCallModal';
 import type { AgentPresence } from './AgentStatusBar';
 
 // Map a live MOS (1–5) to a single signal-strength icon + colour, matching the
@@ -84,6 +86,7 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferDest, setTransferDest] = useState('');
   const [showDialpad, setShowDialpad] = useState(false);
+  const [showBlockModal, setShowBlockModal] = useState(false);
   const { micLevel, speakerLevel } = useAudioLevels(localStream, remoteStream);
 
   const inCall = isCallAnswered || isOutgoingRinging || hasActiveCall;
@@ -291,6 +294,16 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
               <ArrowRightLeft size={20} />
               <span>{t('softphone.transfer')}</span>
             </button>
+            <button
+              type="button"
+              className="softphone-incall-btn"
+              title={t('blacklist.block', 'Block')}
+              onClick={() => setShowBlockModal(true)}
+              disabled={!inCallNumber || inCallNumber.replace(/\D/g, '').length < 5}
+            >
+              <Ban size={20} />
+              <span>{t('blacklist.block', 'Block')}</span>
+            </button>
           </div>
         )}
 
@@ -455,6 +468,13 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
       </div>
 
       <audio ref={remoteAudioRef} autoPlay playsInline style={{ display: 'none' }} />
+
+      {showBlockModal && (
+        <BlockCallModal
+          number={inCallNumber || ''}
+          onClose={() => setShowBlockModal(false)}
+        />
+      )}
     </div>
   );
 }

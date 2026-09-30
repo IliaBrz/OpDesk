@@ -9,6 +9,7 @@ Reference material for integrating with OpDesk and for operating it.
 | [api/webhooks.md](api/webhooks.md) | The **outgoing** CRM call-data push: field catalog, wire key names, duration formats, outcome values, renaming and remapping, delivery log. |
 | [api/contact-lookup.md](api/contact-lookup.md) | The contacts phonebook and the **incoming** CRM contact lookup: `[Number]` URL template, name template, number formats, match verification, manual vs CRM-sourced contacts, softphone/dashboard display. |
 | [api/openapi.yaml](api/openapi.yaml) | OpenAPI 3.0 spec for the machine-reachable surface. Served live at `GET /api/openapi.yaml`. |
+| [guides/blacklist.md](guides/blacklist.md) | Custom phone blacklist: MariaDB table, OpDesk API, FreePBX 15 dialplan (from-internal / opdesk-from-trunk). |
 
 > **Tip:** FastAPI also generates interactive docs for every route the server exposes,
 > at `/docs` (Swagger UI) and `/redoc`. Those are generated from the code and cover the

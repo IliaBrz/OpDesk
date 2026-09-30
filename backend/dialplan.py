@@ -873,3 +873,110 @@ def disable_sip_tls() -> bool:
     return True
 
 
+# ---------------------------------------------------------------------------
+# Custom blacklist dialplan (FreePBX 15)
+# ---------------------------------------------------------------------------
+EXTENSIONS_BLACKLIST_CONF = "/etc/asterisk/extensions_opdesk_blacklist.conf"
+
+
+def write_blacklist_conf(backend_port: int = None) -> bool:
+    """
+    Install OpDesk custom-blacklist dialplan hooks.
+
+    Outbound: [from-internal-custom] for numbers of 5+ digits (local 3–4 digit
+    extensions stay with mobile-wake / FreePBX). On hit → Hangup().
+
+    Inbound: [opdesk-from-trunk] checks CALLERID(num), then Goto(from-trunk,...)
+    on pass. Set each trunk's Context to opdesk-from-trunk (do not redefine
+    FreePBX's [from-trunk]).
+
+    Lookup is CURL → loopback /api/internal/blacklist/check (OpDesk is the proxy;
+    Asterisk never talks to MariaDB directly).
+    """
+    if backend_port is None:
+        backend_port = int(os.getenv("PORT", "8765"))
+
+    log.info(f"Writing blacklist dialplan to {EXTENSIONS_BLACKLIST_CONF}")
+
+    content = f"""; OpDesk custom blacklist — auto-generated. Do not edit manually.
+;
+; FreePBX 15: #include this file from extensions_custom.conf (done automatically).
+; Check API (loopback only): GET /api/internal/blacklist/check?number=...&direction=inbound|outbound
+; Returns body "1" when the call must be blocked, empty otherwise.
+;
+; --- Outbound (from-internal) ---
+; Pattern _XXXXX! = 5 or more digits (E.164 without +). Shorter peers stay on
+; mobile-wake (_XXX/_XXXX) and the rest of FreePBX routing.
+;
+[from-internal-custom]
+exten => _XXXXX!,1,NoOp(OpDesk blacklist outbound check for ${{EXTEN}})
+ same => n,GotoIf($[${{LEN(${{EXTEN}})}}>15]?passthru)
+ same => n,Set(CURLOPT(conntimeout)=1)
+ same => n,Set(CURLOPT(httptimeout)=2)
+ same => n,Set(OPDESKBL=${{CURL(http://127.0.0.1:{backend_port}/api/internal/blacklist/check?number=${{EXTEN}}&direction=outbound)}})
+ same => n,GotoIf($["${{OPDESKBL}}"="1"]?blocked)
+ same => n(passthru),Goto(from-internal-additional,${{EXTEN}},1)
+ same => n(blocked),NoOp(OpDesk blacklist HIT outbound ${{EXTEN}})
+ same => n,Hangup()
+
+; --- Inbound via from-trunk ---
+; FreePBX generates [from-trunk]; do not redefine it (priority collisions).
+; Set each trunk's Context to: opdesk-from-trunk
+; The wrapper checks CALLERID, then Goto(from-trunk,...) on pass, Hangup on hit.
+[opdesk-from-trunk]
+exten => _.,1,NoOp(OpDesk blacklist inbound CID=${{CALLERID(num)}} DID=${{EXTEN}})
+ same => n,Set(CURLOPT(conntimeout)=1)
+ same => n,Set(CURLOPT(httptimeout)=2)
+ same => n,Set(OPDESKBL=${{CURL(http://127.0.0.1:{backend_port}/api/internal/blacklist/check?number=${{FILTER(0-9,${{CALLERID(num)}})}}&direction=inbound)}})
+ same => n,GotoIf($["${{OPDESKBL}}"="1"]?blocked)
+ same => n,Goto(from-trunk,${{EXTEN}},1)
+ same => n(blocked),NoOp(OpDesk blacklist HIT inbound ${{CALLERID(num)}})
+ same => n,Hangup()
+"""
+    try:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.conf') as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+
+        result = subprocess.run(
+            ['sudo', 'cp', tmp_path, EXTENSIONS_BLACKLIST_CONF],
+            capture_output=True, text=True,
+        )
+        subprocess.run(['sudo', 'chmod', '644', EXTENSIONS_BLACKLIST_CONF], capture_output=True)
+        os.unlink(tmp_path)
+
+        if result.returncode != 0:
+            log.error(f"Failed to write {EXTENSIONS_BLACKLIST_CONF}: {result.stderr}")
+            return False
+
+        include_line = f"#include {os.path.basename(EXTENSIONS_BLACKLIST_CONF)}"
+        existing = ""
+        if os.path.exists(EXTENSIONS_CUSTOM_CONF):
+            with open(EXTENSIONS_CUSTOM_CONF, 'r') as f:
+                existing = f.read()
+
+        if include_line not in existing:
+            if existing and not existing.endswith('\n'):
+                existing += '\n'
+            existing += include_line + '\n'
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.conf') as tmp:
+                tmp.write(existing)
+                tmp_path = tmp.name
+            subprocess.run(['sudo', 'cp', tmp_path, EXTENSIONS_CUSTOM_CONF], capture_output=True)
+            subprocess.run(['sudo', 'chmod', '644', EXTENSIONS_CUSTOM_CONF], capture_output=True)
+            os.unlink(tmp_path)
+
+        log.info(f"Blacklist dialplan written to {EXTENSIONS_BLACKLIST_CONF}")
+        return True
+    except Exception as e:
+        log.error(f"Error writing blacklist conf: {e}")
+        return False
+
+
+def enable_blacklist_dialplan() -> bool:
+    """Write blacklist dialplan and reload Asterisk dialplan."""
+    if not write_blacklist_conf():
+        return False
+    return reload_asterisk_dialplan()

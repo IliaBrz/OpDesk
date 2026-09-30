@@ -431,3 +431,27 @@ CREATE TABLE IF NOT EXISTS contacts (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uniq_phone_key (phone_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Custom phone blacklist. Rows are active until unblock_at; a background cron
+-- DELETEs expired rows. Softphone "Block" creates inbound-only rows for 24h;
+-- supervisors/admins manage the full CRUD UI at /blacklist. Dialplan checks
+-- via CURL to /api/internal/blacklist/check (loopback). Also created at
+-- startup by init_blacklist_table().
+-- PRIVACY: contains customer phone numbers.
+CREATE TABLE IF NOT EXISTS blacklist (
+    id           INT AUTO_INCREMENT PRIMARY KEY,
+    number       VARCHAR(15) NOT NULL,              -- digits only, length 5–15 (E.164 without +)
+    reason       ENUM('spam','children','hooligan','security') NOT NULL,
+    inbound      TINYINT(1) NOT NULL DEFAULT 1,
+    outbound     TINYINT(1) NOT NULL DEFAULT 0,
+    creator_id   INT NOT NULL,                     -- users.id who created the block
+    reviewer_id  INT NULL,                         -- users.id who reviewed (NULL = pending)
+    created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at  TIMESTAMP NULL DEFAULT NULL,
+    unblock_at   TIMESTAMP NOT NULL,               -- block expires; cron DELETEs when past
+    INDEX idx_number (number),
+    INDEX idx_unblock_at (unblock_at),
+    INDEX idx_reviewed_at (reviewed_at),
+    INDEX idx_active_number (number, unblock_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

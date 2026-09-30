@@ -25,6 +25,7 @@
     "closeMenu": "Close menu",
     "logs": "Logs",
     "contacts": "Contacts",
+    "blacklist": "Blacklist",
     "team": "Team",
     "expandSidebar": "Expand sidebar",
     "collapseSidebar": "Collapse"
@@ -921,5 +922,55 @@
     "sourceManual": "Manual",
     "sourceCrm": "CRM",
     "call": "Call {{name}}"
+  },
+  "blacklist": {
+    "title": "Blacklist",
+    "subtitle": "Blocked numbers for inbound/outbound calls. Unreviewed entries appear first.",
+    "add": "Add",
+    "addTitle": "Add to blacklist",
+    "editTitle": "Edit blacklist entry",
+    "reviewTitle": "Review blacklist entry",
+    "searchLabel": "Search by number",
+    "searchPlaceholder": "Number…",
+    "loading": "Loading…",
+    "none": "No blacklist entries",
+    "pending": "Pending",
+    "inbound": "In",
+    "outbound": "Out",
+    "blockInbound": "Block inbound",
+    "blockOutbound": "Block outbound",
+    "direction": "Direction",
+    "basic": "Entry",
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving…",
+    "saveFailed": "Save failed",
+    "edit": "Edit",
+    "delete": "Delete",
+    "review": "Review",
+    "confirmDelete": "Delete blacklist entry for {{number}}?",
+    "block": "Block",
+    "blockTitle": "Block number",
+    "blockDescription": "Block this caller for 24 hours (inbound). A supervisor can review the entry later.",
+    "blockFailed": "Could not block number",
+    "blocking": "Blocking…",
+    "col": {
+      "id": "ID",
+      "number": "Number",
+      "reason": "Reason",
+      "direction": "Direction",
+      "created": "Created",
+      "reviewed": "Reviewed",
+      "unblock": "Unblock",
+      "creator": "Creator",
+      "reviewer": "Reviewer",
+      "actions": "Actions"
+    },
+    "reasons": {
+      "spam": "Spam",
+      "children": "Children",
+      "hooligan": "Hooligan",
+      "security": "Security"
+    }
   }
 }

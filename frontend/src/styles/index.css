@@ -5081,7 +5081,7 @@ select.an-filter-select option:checked {
 }
 
 .softphone-incall-grid--compact {
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   margin: 4px 0 8px;
   padding: 0;
 }

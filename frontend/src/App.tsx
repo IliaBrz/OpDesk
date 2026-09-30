@@ -21,6 +21,7 @@ import { GroupsPanel } from './components/GroupsPanel';
 import { SupervisorModal } from './components/SupervisorModal';
 import { SettingsPanel, type SettingsTab } from './components/CRMSettingsModal';
 import { ContactsPanel } from './components/ContactsPanel';
+import { BlacklistPanel } from './components/BlacklistPanel';
 import { FloatingSoftphone } from './components/FloatingSoftphone';
 import {
   Phone,
@@ -58,14 +59,15 @@ import {
   Smartphone,
   Disc,
   PauseCircle,
+  Ban,
+  BookUser,
   Terminal,
   KeyRound,
-  BookUser,
 } from 'lucide-react';
 import { quickRanges, type DateRange } from './components/analyticsUtils';
 import { raiseFor } from './lib/api';
 
-type TabType = 'dashboard' | 'extensions' | 'calls' | 'queues' | 'call-log' | 'contacts' | 'groups' | 'users' | 'analytics' | 'logs' | 'settings';
+type TabType = 'dashboard' | 'extensions' | 'calls' | 'queues' | 'call-log' | 'contacts' | 'blacklist' | 'groups' | 'users' | 'analytics' | 'logs' | 'settings';
 const LANGUAGE_OPTIONS = SUPPORTED_LANGUAGES;
 /** Kept in sync with the pre-paint theme script in index.html. */
 const THEME_KEY = 'opdesk:theme';
@@ -73,7 +75,7 @@ const THEME_KEY = 'opdesk:theme';
 // URL routing: each tab maps 1:1 to a path segment (e.g. 'call-log' -> '/call-log').
 // Deriving the active tab from the URL is what makes a refresh stay on the same page
 // and lets users navigate straight to /dashboard, /extensions, etc.
-const TAB_PATHS: TabType[] = ['dashboard', 'extensions', 'calls', 'queues', 'call-log', 'contacts', 'groups', 'users', 'analytics', 'logs', 'settings'];
+const TAB_PATHS: TabType[] = ['dashboard', 'extensions', 'calls', 'queues', 'call-log', 'contacts', 'blacklist', 'groups', 'users', 'analytics', 'logs', 'settings'];
 const DEFAULT_TAB: TabType = 'dashboard';
 function pathToTab(pathname: string): TabType {
   const seg = pathname.replace(/^\/+/, '').split('/')[0];
@@ -470,10 +472,15 @@ function App({ onLogout }: AppProps) {
     }
   }, [location.pathname, navigate]);
 
-  // Agent only has Extensions, Active Calls, Call History; redirect away from other tabs
+  // Agent only has Extensions, Active Calls, Call History, Contacts; redirect away from other tabs
   const userRole = getUser()?.role;
   useEffect(() => {
     if (userRole === 'agent' && !['dashboard', 'extensions', 'calls', 'call-log', 'contacts'].includes(activeTab)) {
+      navigate(`/${DEFAULT_TAB}`, { replace: true });
+      return;
+    }
+    // Blacklist is supervisor + admin only
+    if (userRole === 'agent' && activeTab === 'blacklist') {
       navigate(`/${DEFAULT_TAB}`, { replace: true });
       return;
     }
@@ -802,6 +809,13 @@ function App({ onLogout }: AppProps) {
               <BookUser size={16} />{!sidebarCollapsed && t('nav.contacts', 'Contacts')}
             </button>
 
+            {/* Blacklist — supervisor + admin only */}
+            {(getUser()?.role === 'admin' || getUser()?.role === 'supervisor') && (
+              <button className={`sidebar-item${activeTab === 'blacklist' ? ' active' : ''}`} onClick={() => selectTab('blacklist')} title={sidebarCollapsed ? t('nav.blacklist', 'Blacklist') : undefined}>
+                <Ban size={16} />{!sidebarCollapsed && t('nav.blacklist', 'Blacklist')}
+              </button>
+            )}
+
             {getUser()?.role !== 'agent' && (
               <button className={`sidebar-item${activeTab === 'analytics' ? ' active' : ''}`} onClick={() => selectTab('analytics')} title={sidebarCollapsed ? t('nav.analytics') : undefined}>
                 <BarChart3 size={16} />{!sidebarCollapsed && t('nav.analytics')}
@@ -1002,6 +1016,7 @@ function App({ onLogout }: AppProps) {
               }}
             />
           )}
+          {activeTab === 'blacklist' && <BlacklistPanel />}
           {activeTab === 'analytics' && <AnalyticsPanel dateRange={dateRange} onDateRangeChange={setDateRange} />}
           {activeTab === 'groups' && (
             <GroupsPanel

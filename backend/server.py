@@ -59,9 +59,18 @@ from db_manager import (
     # Contacts (system phonebook, fed manually and by the CRM lookup)
     init_contacts_table, list_contacts, create_contact, update_contact,
     delete_contact, get_contacts_for_resolver,
+    # Custom phone blacklist
+    BLACKLIST_REASONS, init_blacklist_table, list_blacklist, get_blacklist_entry,
+    find_active_blacklist, is_number_blocked, create_blacklist_entry,
+    update_blacklist_entry, review_blacklist_entry, delete_blacklist_entry,
+    prune_expired_blacklist,
 )
 from agent_presence import PresenceRecorder
-from dialplan import enable_qos, disable_qos, enable_sip_tls, disable_sip_tls, enable_mobile_wake, disable_mobile_wake, enable_recording, disable_recording, reload_asterisk_sip, set_pjsip_logger
+from dialplan import (
+    enable_qos, disable_qos, enable_sip_tls, disable_sip_tls,
+    enable_mobile_wake, disable_mobile_wake, enable_recording, disable_recording,
+    reload_asterisk_sip, set_pjsip_logger, enable_blacklist_dialplan,
+)
 from call_log import call_log as get_call_log, build_call_journey_from_cdr, CALL_OUTCOMES
 import analytics as analytics_module
 import push_service
@@ -1124,7 +1133,20 @@ async def lifespan(app: FastAPI):
     init_webhook_deliveries_table()
     # Ensure the contacts table (system phonebook) exists
     init_contacts_table()
+    # Ensure the custom phone blacklist table exists
+    init_blacklist_table()
 
+    # Install FreePBX blacklist dialplan hooks (best-effort — needs sudo on the PBX host)
+    try:
+        if enable_blacklist_dialplan():
+            log.info("Blacklist dialplan enabled")
+        else:
+            log.warning("Blacklist dialplan not installed (sudo/Asterisk unavailable?)")
+    except Exception as e:
+        log.warning(f"Blacklist dialplan setup skipped: {e}")
+
+    # Expire blacklist rows on a timer (independent of AMI)
+    asyncio.create_task(_blacklist_prune_loop())
 
     # WebRTC default host: prefer the configured public domain (its TLS cert matches); otherwise
     # fall back to the detected local IP. Can be overridden via settings/UI.
@@ -1837,6 +1859,26 @@ def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin only")
     return current_user
+
+
+def require_supervisor_or_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """Dependency: require supervisor or admin (blacklist management)."""
+    if current_user.get("role") not in ("admin", "supervisor"):
+        raise HTTPException(status_code=403, detail="Supervisor or admin only")
+    return current_user
+
+
+async def _blacklist_prune_loop():
+    """Background cron: DELETE blacklist rows whose unblock_at has passed."""
+    log.info("blacklist: prune loop started")
+    while True:
+        try:
+            removed = await asyncio.to_thread(prune_expired_blacklist)
+            if removed:
+                log.info(f"blacklist: pruned {removed} expired row(s)")
+        except Exception as e:
+            log.warning(f"blacklist: prune loop error: {e}")
+        await asyncio.sleep(300)  # every 5 minutes
 
 
 # ---------------------------------------------------------------------------
@@ -3894,6 +3936,222 @@ async def api_delete_contact(contact_id: int, current_user: dict = Depends(requi
         raise HTTPException(status_code=404, detail="Contact not found")
     await _reload_resolver_contacts()
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# Custom phone blacklist
+# ---------------------------------------------------------------------------
+_BLACKLIST_NUMBER_RE = re.compile(r'^[0-9]{5,15}$')
+
+
+def _normalize_blacklist_number(raw: str) -> str:
+    """Keep digits only; validate length 5–15."""
+    digits = re.sub(r'\D', '', (raw or '').strip())
+    if not _BLACKLIST_NUMBER_RE.fullmatch(digits):
+        raise HTTPException(
+            status_code=400,
+            detail="Phone number must be 5–15 digits (0-9 only)",
+        )
+    return digits
+
+
+def _parse_unblock_at(raw: str) -> str:
+    """Accept ISO / 'YYYY-MM-DD HH:MM:SS' / 'YYYY-MM-DDTHH:MM' → MySQL datetime string."""
+    s = (raw or '').strip().replace('T', ' ')
+    if not s:
+        raise HTTPException(status_code=400, detail="unblock_at is required")
+    s = s.replace('Z', '')
+    if '+' in s[10:]:
+        s = s.split('+')[0].strip()
+    if len(s) == 16:  # YYYY-MM-DD HH:MM
+        s = s + ':00'
+    try:
+        dt = datetime.strptime(s[:19], '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid unblock_at datetime")
+    if dt <= datetime.now():
+        raise HTTPException(status_code=400, detail="unblock_at must be in the future")
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _validate_blacklist_reason(reason: str) -> str:
+    r = (reason or '').strip().lower()
+    if r not in BLACKLIST_REASONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"reason must be one of: {', '.join(BLACKLIST_REASONS)}",
+        )
+    return r
+
+
+class BlacklistCreateBody(BaseModel):
+    number: str
+    reason: str
+    inbound: bool = True
+    outbound: bool = False
+    unblock_at: str
+
+
+class BlacklistUpdateBody(BaseModel):
+    number: Optional[str] = None
+    reason: Optional[str] = None
+    inbound: Optional[bool] = None
+    outbound: Optional[bool] = None
+    unblock_at: Optional[str] = None
+
+
+class BlacklistReviewBody(BaseModel):
+    reason: str
+    inbound: bool
+    outbound: bool
+    unblock_at: str
+
+
+class BlacklistSoftphoneBody(BaseModel):
+    number: str
+    reason: str
+
+
+@app.api_route("/api/internal/blacklist/check", methods=["GET", "POST"])
+async def internal_blacklist_check(
+    request: Request,
+    number: str = "",
+    direction: str = "inbound",
+):
+    """Dialplan CURL check. Loopback only. Body \"1\" = block, empty = allow."""
+    client_host = getattr(request.client, "host", "")
+    if client_host not in ("127.0.0.1", "::1"):
+        raise HTTPException(status_code=403, detail="Loopback only")
+    digits = re.sub(r'\D', '', (number or '').strip())
+    direction = (direction or 'inbound').strip().lower()
+    if direction not in ('inbound', 'outbound'):
+        return PlainTextResponse("")
+    if not digits or not await asyncio.to_thread(is_number_blocked, digits, direction):
+        return PlainTextResponse("")
+    return PlainTextResponse("1")
+
+
+@app.get("/api/blacklist")
+async def api_list_blacklist(
+    q: str = "",
+    current_user: dict = Depends(require_supervisor_or_admin),
+):
+    """List blacklist entries (supervisor/admin). Optional ?q= number substring."""
+    q_digits = re.sub(r'\D', '', (q or '').strip()) or None
+    rows = await asyncio.to_thread(list_blacklist, q_digits)
+    return {"items": rows}
+
+
+@app.post("/api/blacklist", status_code=201)
+async def api_create_blacklist(
+    body: BlacklistCreateBody,
+    current_user: dict = Depends(require_supervisor_or_admin),
+):
+    """Manual add from the Blacklist page. Default UI: inbound-only, +24h."""
+    number = _normalize_blacklist_number(body.number)
+    reason = _validate_blacklist_reason(body.reason)
+    unblock_at = _parse_unblock_at(body.unblock_at)
+    if not body.inbound and not body.outbound:
+        raise HTTPException(status_code=400, detail="At least one of inbound/outbound must be enabled")
+    existing = await asyncio.to_thread(find_active_blacklist, number)
+    if existing:
+        raise HTTPException(status_code=409, detail="Number is already blacklisted")
+    entry_id = await asyncio.to_thread(
+        create_blacklist_entry,
+        number, reason, bool(body.inbound), bool(body.outbound),
+        int(current_user["id"]), unblock_at,
+    )
+    if not entry_id:
+        raise HTTPException(status_code=500, detail="Failed to create blacklist entry")
+    return await asyncio.to_thread(get_blacklist_entry, entry_id)
+
+
+@app.put("/api/blacklist/{entry_id}")
+async def api_update_blacklist(
+    entry_id: int,
+    body: BlacklistUpdateBody,
+    current_user: dict = Depends(require_supervisor_or_admin),
+):
+    """Edit editable fields (not created_at / reviewed_at / creator / reviewer)."""
+    existing = await asyncio.to_thread(get_blacklist_entry, entry_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+    number = _normalize_blacklist_number(body.number) if body.number is not None else None
+    reason = _validate_blacklist_reason(body.reason) if body.reason is not None else None
+    unblock_at = _parse_unblock_at(body.unblock_at) if body.unblock_at is not None else None
+    inbound = body.inbound
+    outbound = body.outbound
+    if number and number != existing['number']:
+        conflict = await asyncio.to_thread(find_active_blacklist, number)
+        if conflict and conflict['id'] != entry_id:
+            raise HTTPException(status_code=409, detail="Number is already blacklisted")
+    final_in = existing['inbound'] if inbound is None else bool(inbound)
+    final_out = existing['outbound'] if outbound is None else bool(outbound)
+    if not final_in and not final_out:
+        raise HTTPException(status_code=400, detail="At least one of inbound/outbound must be enabled")
+    ok = await asyncio.to_thread(
+        update_blacklist_entry, entry_id,
+        number=number, reason=reason, inbound=inbound, outbound=outbound, unblock_at=unblock_at,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to update blacklist entry")
+    return await asyncio.to_thread(get_blacklist_entry, entry_id)
+
+
+@app.post("/api/blacklist/{entry_id}/review")
+async def api_review_blacklist(
+    entry_id: int,
+    body: BlacklistReviewBody,
+    current_user: dict = Depends(require_supervisor_or_admin),
+):
+    """Review: may adjust reason / directions / unblock_at; stamps reviewer + reviewed_at."""
+    existing = await asyncio.to_thread(get_blacklist_entry, entry_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+    reason = _validate_blacklist_reason(body.reason)
+    unblock_at = _parse_unblock_at(body.unblock_at)
+    if not body.inbound and not body.outbound:
+        raise HTTPException(status_code=400, detail="At least one of inbound/outbound must be enabled")
+    ok = await asyncio.to_thread(
+        review_blacklist_entry,
+        entry_id, int(current_user["id"]), reason,
+        bool(body.inbound), bool(body.outbound), unblock_at,
+    )
+    if not ok:
+        raise HTTPException(status_code=500, detail="Failed to review blacklist entry")
+    return await asyncio.to_thread(get_blacklist_entry, entry_id)
+
+
+@app.delete("/api/blacklist/{entry_id}")
+async def api_delete_blacklist(
+    entry_id: int,
+    current_user: dict = Depends(require_supervisor_or_admin),
+):
+    """Hard-delete a blacklist row."""
+    if not await asyncio.to_thread(delete_blacklist_entry, entry_id):
+        raise HTTPException(status_code=404, detail="Blacklist entry not found")
+    return {"status": "ok"}
+
+
+@app.post("/api/blacklist/block", status_code=201)
+async def api_softphone_block(
+    body: BlacklistSoftphoneBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Softphone Block during an active call. Any role. Inbound-only, +24 hours."""
+    number = _normalize_blacklist_number(body.number)
+    reason = _validate_blacklist_reason(body.reason)
+    existing = await asyncio.to_thread(find_active_blacklist, number)
+    if existing:
+        raise HTTPException(status_code=409, detail="Number is already blacklisted")
+    unblock_at = (datetime.now() + timedelta(hours=24)).strftime('%Y-%m-%d %H:%M:%S')
+    entry_id = await asyncio.to_thread(
+        create_blacklist_entry,
+        number, reason, True, False, int(current_user["id"]), unblock_at,
+    )
+    if not entry_id:
+        raise HTTPException(status_code=500, detail="Failed to create blacklist entry")
+    return await asyncio.to_thread(get_blacklist_entry, entry_id)
 
 
 @app.post("/api/crm/lookup-test")

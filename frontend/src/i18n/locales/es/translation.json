@@ -23,7 +23,8 @@
     "openMenu": "Abrir menú",
     "closeMenu": "Cerrar menú",
     "logs": "Registros",
-    "contacts": "Contactos"
+    "contacts": "Contactos",
+    "blacklist": "Lista negra"
   },
   "header": {
     "softphoneRegistered": "Softphone (registrado)",
@@ -902,5 +903,54 @@
     "sourceManual": "Manual",
     "sourceCrm": "CRM",
     "call": "Llamar a {{name}}"
+  },
+  "blacklist": {
+    "subtitle": "Números bloqueados para llamadas entrantes/salientes. Sin revisar arriba.",
+    "add": "Añadir",
+    "addTitle": "Añadir a la lista negra",
+    "editTitle": "Editar entrada",
+    "reviewTitle": "Revisar entrada",
+    "searchLabel": "Buscar por número",
+    "searchPlaceholder": "Número…",
+    "loading": "Cargando…",
+    "none": "No hay entradas",
+    "pending": "Pendiente",
+    "inbound": "Ent.",
+    "outbound": "Sal.",
+    "blockInbound": "Bloquear entrantes",
+    "blockOutbound": "Bloquear salientes",
+    "direction": "Dirección",
+    "basic": "Entrada",
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "saving": "Guardando…",
+    "saveFailed": "Error al guardar",
+    "edit": "Editar",
+    "delete": "Eliminar",
+    "review": "Revisar",
+    "confirmDelete": "¿Eliminar el bloqueo de {{number}}?",
+    "block": "Bloquear",
+    "blockTitle": "Bloquear número",
+    "blockDescription": "Bloquear este número 24 horas (entrantes). Un supervisor puede revisarlo después.",
+    "blockFailed": "No se pudo bloquear el número",
+    "blocking": "Bloqueando…",
+    "col": {
+      "id": "ID",
+      "number": "Número",
+      "reason": "Motivo",
+      "direction": "Dirección",
+      "created": "Creado",
+      "reviewed": "Revisado",
+      "unblock": "Desbloqueo",
+      "creator": "Autor",
+      "reviewer": "Revisor",
+      "actions": "Acciones"
+    },
+    "reasons": {
+      "spam": "Spam",
+      "children": "Niños",
+      "hooligan": "Gamberro",
+      "security": "Seguridad"
+    }
   }
 }
