@@ -443,6 +443,7 @@ CREATE TABLE IF NOT EXISTS blacklist (
     id           INT AUTO_INCREMENT PRIMARY KEY,
     number       VARCHAR(15) NOT NULL,              -- digits only, length 5–15 (E.164 without +)
     reason       ENUM('spam','children','hooligan','security') NOT NULL,
+    comment      VARCHAR(500) NOT NULL DEFAULT '',  -- free-text note; empty by default
     inbound      TINYINT(1) NOT NULL DEFAULT 1,
     outbound     TINYINT(1) NOT NULL DEFAULT 0,
     creator_id   INT NOT NULL,                     -- users.id who created the block

@@ -3366,6 +3366,7 @@ def init_blacklist_table() -> None:
                 id           INT AUTO_INCREMENT PRIMARY KEY,
                 number       VARCHAR(15) NOT NULL,
                 reason       ENUM('spam','children','hooligan','security') NOT NULL,
+                comment      VARCHAR(500) NOT NULL DEFAULT '',
                 inbound      TINYINT(1) NOT NULL DEFAULT 1,
                 outbound     TINYINT(1) NOT NULL DEFAULT 0,
                 creator_id   INT NOT NULL,
@@ -3379,6 +3380,17 @@ def init_blacklist_table() -> None:
                 INDEX idx_active_number (number, unblock_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         """)
+        # Upgrade path: tables created before `comment` existed.
+        try:
+            cursor.execute(
+                "ALTER TABLE blacklist ADD COLUMN comment VARCHAR(500) NOT NULL DEFAULT '' "
+                "AFTER reason"
+            )
+            conn.commit()
+        except Error as alter_err:
+            # Duplicate column name (1060) — already present.
+            if getattr(alter_err, 'errno', None) != 1060:
+                log.warning(f"⚠️  Database error ensuring blacklist.comment: {alter_err}")
         conn.commit()
     except Error as e:
         log.warning(f"⚠️  Database error init_blacklist_table: {e}")
@@ -3409,7 +3421,7 @@ def list_blacklist(number_q: Optional[str] = None) -> list:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor(dictionary=True)
         sql = (
-            "SELECT b.id, b.number, b.reason, b.inbound, b.outbound, "
+            "SELECT b.id, b.number, b.reason, b.comment, b.inbound, b.outbound, "
             "b.creator_id, b.reviewer_id, b.created_at, b.reviewed_at, b.unblock_at, "
             "cu.username AS creator_username, ru.username AS reviewer_username "
             "FROM blacklist b "
@@ -3441,7 +3453,7 @@ def get_blacklist_entry(entry_id: int) -> Optional[dict]:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
-            "SELECT b.id, b.number, b.reason, b.inbound, b.outbound, "
+            "SELECT b.id, b.number, b.reason, b.comment, b.inbound, b.outbound, "
             "b.creator_id, b.reviewer_id, b.created_at, b.reviewed_at, b.unblock_at, "
             "cu.username AS creator_username, ru.username AS reviewer_username "
             "FROM blacklist b "
@@ -3512,6 +3524,7 @@ def create_blacklist_entry(
     outbound: bool,
     creator_id: int,
     unblock_at: str,
+    comment: str = '',
 ) -> Optional[int]:
     """Insert a blacklist row. Returns new id, or None on error.
     Caller must ensure no active duplicate exists."""
@@ -3528,9 +3541,10 @@ def create_blacklist_entry(
             (number,),
         )
         cursor.execute(
-            "INSERT INTO blacklist (number, reason, inbound, outbound, creator_id, unblock_at) "
-            "VALUES (%s,%s,%s,%s,%s,%s)",
-            (number, reason, 1 if inbound else 0, 1 if outbound else 0, creator_id, unblock_at),
+            "INSERT INTO blacklist (number, reason, comment, inbound, outbound, creator_id, unblock_at) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (number, reason, (comment or '')[:500], 1 if inbound else 0, 1 if outbound else 0,
+             creator_id, unblock_at),
         )
         conn.commit()
         return cursor.lastrowid
@@ -3549,6 +3563,7 @@ def update_blacklist_entry(
     inbound: Optional[bool] = None,
     outbound: Optional[bool] = None,
     unblock_at: Optional[str] = None,
+    comment: Optional[str] = None,
 ) -> bool:
     """Partial update of editable fields. True when the row exists."""
     fields = []
@@ -3568,6 +3583,9 @@ def update_blacklist_entry(
     if unblock_at is not None:
         fields.append("unblock_at=%s")
         params.append(unblock_at)
+    if comment is not None:
+        fields.append("comment=%s")
+        params.append(comment[:500])
     if not fields:
         return True
     params.append(entry_id)
@@ -3600,6 +3618,7 @@ def review_blacklist_entry(
     inbound: bool,
     outbound: bool,
     unblock_at: str,
+    comment: str = '',
 ) -> bool:
     """Apply review edits and stamp reviewer_id + reviewed_at=NOW()."""
     config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
@@ -3609,9 +3628,10 @@ def review_blacklist_entry(
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE blacklist SET reason=%s, inbound=%s, outbound=%s, unblock_at=%s, "
+            "UPDATE blacklist SET reason=%s, comment=%s, inbound=%s, outbound=%s, unblock_at=%s, "
             "reviewer_id=%s, reviewed_at=NOW() WHERE id=%s",
-            (reason, 1 if inbound else 0, 1 if outbound else 0, unblock_at, reviewer_id, entry_id),
+            (reason, (comment or '')[:500], 1 if inbound else 0, 1 if outbound else 0,
+             unblock_at, reviewer_id, entry_id),
         )
         conn.commit()
         if (cursor.rowcount or 0) > 0:

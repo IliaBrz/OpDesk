@@ -3990,6 +3990,7 @@ class BlacklistCreateBody(BaseModel):
     inbound: bool = True
     outbound: bool = False
     unblock_at: str
+    comment: Optional[str] = ''
 
 
 class BlacklistUpdateBody(BaseModel):
@@ -3998,6 +3999,7 @@ class BlacklistUpdateBody(BaseModel):
     inbound: Optional[bool] = None
     outbound: Optional[bool] = None
     unblock_at: Optional[str] = None
+    comment: Optional[str] = None
 
 
 class BlacklistReviewBody(BaseModel):
@@ -4005,11 +4007,13 @@ class BlacklistReviewBody(BaseModel):
     inbound: bool
     outbound: bool
     unblock_at: str
+    comment: Optional[str] = ''
 
 
 class BlacklistSoftphoneBody(BaseModel):
     number: str
     reason: str
+    comment: Optional[str] = ''
 
 
 @app.api_route("/api/internal/blacklist/check", methods=["GET", "POST"])
@@ -4059,7 +4063,7 @@ async def api_create_blacklist(
     entry_id = await asyncio.to_thread(
         create_blacklist_entry,
         number, reason, bool(body.inbound), bool(body.outbound),
-        int(current_user["id"]), unblock_at,
+        int(current_user["id"]), unblock_at, (body.comment or '').strip(),
     )
     if not entry_id:
         raise HTTPException(status_code=500, detail="Failed to create blacklist entry")
@@ -4081,6 +4085,7 @@ async def api_update_blacklist(
     unblock_at = _parse_unblock_at(body.unblock_at) if body.unblock_at is not None else None
     inbound = body.inbound
     outbound = body.outbound
+    comment = (body.comment.strip() if isinstance(body.comment, str) else None)
     if number and number != existing['number']:
         conflict = await asyncio.to_thread(find_active_blacklist, number)
         if conflict and conflict['id'] != entry_id:
@@ -4091,7 +4096,8 @@ async def api_update_blacklist(
         raise HTTPException(status_code=400, detail="At least one of inbound/outbound must be enabled")
     ok = await asyncio.to_thread(
         update_blacklist_entry, entry_id,
-        number=number, reason=reason, inbound=inbound, outbound=outbound, unblock_at=unblock_at,
+        number=number, reason=reason, inbound=inbound, outbound=outbound,
+        unblock_at=unblock_at, comment=comment,
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to update blacklist entry")
@@ -4116,6 +4122,7 @@ async def api_review_blacklist(
         review_blacklist_entry,
         entry_id, int(current_user["id"]), reason,
         bool(body.inbound), bool(body.outbound), unblock_at,
+        (body.comment or '').strip(),
     )
     if not ok:
         raise HTTPException(status_code=500, detail="Failed to review blacklist entry")
@@ -4148,6 +4155,7 @@ async def api_softphone_block(
     entry_id = await asyncio.to_thread(
         create_blacklist_entry,
         number, reason, True, False, int(current_user["id"]), unblock_at,
+        (body.comment or '').strip(),
     )
     if not entry_id:
         raise HTTPException(status_code=500, detail="Failed to create blacklist entry")

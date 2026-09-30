@@ -294,16 +294,6 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
               <ArrowRightLeft size={20} />
               <span>{t('softphone.transfer')}</span>
             </button>
-            <button
-              type="button"
-              className="softphone-incall-btn"
-              title={t('blacklist.block', 'Block')}
-              onClick={() => setShowBlockModal(true)}
-              disabled={!inCallNumber || inCallNumber.replace(/\D/g, '').length < 5}
-            >
-              <Ban size={20} />
-              <span>{t('blacklist.block', 'Block')}</span>
-            </button>
           </div>
         )}
 
@@ -347,6 +337,15 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
         )}
 
         <div className="softphone-bottom-actions">
+          <button
+            type="button"
+            className="softphone-bottom-btn"
+            onClick={() => setShowBlockModal(true)}
+            disabled={!inCall || !(inCallNumber || '').replace(/\D/g, '').length}
+            title={t('blacklist.block', 'Block')}
+          >
+            <Ban size={20} />
+          </button>
           <button
             type="button"
             className={`softphone-bottom-btn ${isMuted ? 'softphone-bottom-btn-active' : ''}`}

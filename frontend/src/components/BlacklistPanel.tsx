@@ -11,6 +11,7 @@ export interface BlacklistEntry {
   id: number;
   number: string;
   reason: BlacklistReason;
+  comment?: string;
   inbound: boolean;
   outbound: boolean;
   creator_id: number;
@@ -25,6 +26,7 @@ export interface BlacklistEntry {
 interface EntryForm {
   number: string;
   reason: BlacklistReason;
+  comment: string;
   inbound: boolean;
   outbound: boolean;
   unblock_at: string;
@@ -58,6 +60,7 @@ function blankForm(): EntryForm {
   return {
     number: '',
     reason: 'spam',
+    comment: '',
     inbound: true,
     outbound: false,
     unblock_at: defaultUnblockLocal(),
@@ -69,6 +72,7 @@ function formFromEntry(e: BlacklistEntry): EntryForm {
   return {
     number: e.number,
     reason: e.reason,
+    comment: e.comment || '',
     inbound: !!e.inbound,
     outbound: !!e.outbound,
     unblock_at: ub ? toLocalInputValue(ub) : defaultUnblockLocal(),
@@ -156,6 +160,7 @@ export function BlacklistPanel() {
             inbound: form.inbound,
             outbound: form.outbound,
             unblock_at: form.unblock_at,
+            comment: form.comment.trim(),
           }),
         });
         if (!res.ok) await raiseFor(res);
@@ -169,6 +174,7 @@ export function BlacklistPanel() {
             inbound: form.inbound,
             outbound: form.outbound,
             unblock_at: form.unblock_at,
+            comment: form.comment.trim(),
           }),
         });
         if (!res.ok) await raiseFor(res);
@@ -181,6 +187,7 @@ export function BlacklistPanel() {
             inbound: form.inbound,
             outbound: form.outbound,
             unblock_at: form.unblock_at,
+            comment: form.comment.trim(),
           }),
         });
         if (!res.ok) await raiseFor(res);
@@ -243,6 +250,7 @@ export function BlacklistPanel() {
               <th>{t('blacklist.col.id', 'ID')}</th>
               <th>{t('blacklist.col.number', 'Number')}</th>
               <th>{t('blacklist.col.reason', 'Reason')}</th>
+              <th>{t('blacklist.col.comment', 'Comment')}</th>
               <th>{t('blacklist.col.direction', 'Direction')}</th>
               <th>{t('blacklist.col.created', 'Created')}</th>
               <th>{t('blacklist.col.reviewed', 'Reviewed')}</th>
@@ -260,6 +268,9 @@ export function BlacklistPanel() {
                   <td className="notes-cell-strong" dir="ltr">{row.id}</td>
                   <td dir="ltr" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{row.number}</td>
                   <td>{reasonLabel(row.reason)}</td>
+                  <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={row.comment || ''}>
+                    {row.comment || '—'}
+                  </td>
                   <td>
                     {row.inbound && <span className="badge badge-muted" style={{ marginInlineEnd: 4 }}>{t('blacklist.inbound', 'In')}</span>}
                     {row.outbound && <span className="badge badge-muted">{t('blacklist.outbound', 'Out')}</span>}
@@ -293,14 +304,14 @@ export function BlacklistPanel() {
             })}
             {!loading && items.length === 0 && (
               <tr>
-                <td colSpan={10} className="notes-table-empty">
+                <td colSpan={11} className="notes-table-empty">
                   {t('blacklist.none', 'No blacklist entries')}
                 </td>
               </tr>
             )}
             {loading && items.length === 0 && (
               <tr>
-                <td colSpan={10} className="notes-table-empty">{t('blacklist.loading', 'Loading…')}</td>
+                <td colSpan={11} className="notes-table-empty">{t('blacklist.loading', 'Loading…')}</td>
               </tr>
             )}
           </tbody>
@@ -358,6 +369,18 @@ export function BlacklistPanel() {
                   <option key={r} value={r}>{reasonLabel(r)}</option>
                 ))}
               </select>
+            </FormField>
+          </FormRow>
+          <FormRow single>
+            <FormField label={t('blacklist.col.comment', 'Comment')}>
+              <textarea
+                className="form-input"
+                rows={2}
+                value={form.comment}
+                maxLength={500}
+                onChange={(e) => setForm((f) => ({ ...f, comment: e.target.value.slice(0, 500) }))}
+                placeholder={t('blacklist.commentPlaceholder', 'Optional note')}
+              />
             </FormField>
           </FormRow>
           <FormRow>

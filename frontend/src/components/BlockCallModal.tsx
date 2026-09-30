@@ -21,6 +21,7 @@ const REASONS: BlacklistReason[] = ['spam', 'children', 'hooligan', 'security'];
 export function BlockCallModal({ number, onClose, onBlocked }: BlockCallModalProps) {
   const { t } = useTranslation();
   const [reason, setReason] = useState<BlacklistReason>('spam');
+  const [comment, setComment] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,7 +36,7 @@ export function BlockCallModal({ number, onClose, onBlocked }: BlockCallModalPro
       const res = await fetchWithAuth('/api/blacklist/block', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ number: digits, reason }),
+        body: JSON.stringify({ number: digits, reason, comment: comment.trim() }),
       });
       if (!res.ok) await raiseFor(res);
       onBlocked?.();
@@ -127,6 +128,18 @@ export function BlockCallModal({ number, onClose, onBlocked }: BlockCallModalPro
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">{t('blacklist.col.comment', 'Comment')}</label>
+              <textarea
+                className="form-input"
+                rows={2}
+                value={comment}
+                maxLength={500}
+                onChange={(e) => setComment(e.target.value.slice(0, 500))}
+                placeholder={t('blacklist.commentPlaceholder', 'Optional note')}
+              />
             </div>
           </div>
 
