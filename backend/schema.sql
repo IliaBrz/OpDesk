@@ -450,7 +450,9 @@ CREATE TABLE IF NOT EXISTS blacklist (
     reviewer_id  INT NULL,                         -- users.id who reviewed (NULL = pending)
     created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     reviewed_at  TIMESTAMP NULL DEFAULT NULL,
-    unblock_at   TIMESTAMP NOT NULL,               -- block expires; cron DELETEs when past
+    -- DATETIME (not TIMESTAMP): TIMESTAMP tops out at 2038-01-19; unblock dates
+    -- like 2056 must persist. Comparisons with NOW() still work for the prune cron.
+    unblock_at   DATETIME NOT NULL,
     INDEX idx_number (number),
     INDEX idx_unblock_at (unblock_at),
     INDEX idx_reviewed_at (reviewed_at),

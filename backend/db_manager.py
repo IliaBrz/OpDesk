@@ -3373,7 +3373,7 @@ def init_blacklist_table() -> None:
                 reviewer_id  INT NULL,
                 created_at   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 reviewed_at  TIMESTAMP NULL DEFAULT NULL,
-                unblock_at   TIMESTAMP NOT NULL,
+                unblock_at   DATETIME NOT NULL,
                 INDEX idx_number (number),
                 INDEX idx_unblock_at (unblock_at),
                 INDEX idx_reviewed_at (reviewed_at),
@@ -3391,6 +3391,13 @@ def init_blacklist_table() -> None:
             # Duplicate column name (1060) — already present.
             if getattr(alter_err, 'errno', None) != 1060:
                 log.warning(f"⚠️  Database error ensuring blacklist.comment: {alter_err}")
+        # TIMESTAMP saturates at 2038-01-19; years like 2056 became zero-dates / NULL.
+        # DATETIME keeps far-future unblock times.
+        try:
+            cursor.execute("ALTER TABLE blacklist MODIFY COLUMN unblock_at DATETIME NOT NULL")
+            conn.commit()
+        except Error as alter_err:
+            log.warning(f"⚠️  Database error migrating blacklist.unblock_at to DATETIME: {alter_err}")
         conn.commit()
     except Error as e:
         log.warning(f"⚠️  Database error init_blacklist_table: {e}")
