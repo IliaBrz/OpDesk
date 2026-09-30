@@ -310,6 +310,8 @@
     "refresh": "تحديث",
     "endCall": "إنهاء المكالمة",
     "backspace": "حذف",
+    "showDialpad": "إظهار لوحة الأرقام",
+    "hideDialpad": "إخفاء لوحة الأرقام",
     "status": {
       "connecting": "جارٍ الاتصال...",
       "registered": "مسجّل",

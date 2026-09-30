@@ -310,6 +310,8 @@
     "refresh": "Atualizar",
     "endCall": "Encerrar chamada",
     "backspace": "Apagar",
+    "showDialpad": "Mostrar teclado",
+    "hideDialpad": "Ocultar teclado",
     "status": {
       "connecting": "Conectando...",
       "registered": "Registrado",

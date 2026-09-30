@@ -314,6 +314,8 @@
     "refresh": "Обновить",
     "endCall": "Завершить",
     "backspace": "Стереть",
+    "showDialpad": "Показать клавиатуру",
+    "hideDialpad": "Скрыть клавиатуру",
     "status": {
       "connecting": "Подключение…",
       "registered": "Зарегистрирован",

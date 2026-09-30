@@ -161,11 +161,50 @@ export class WebPhone {
     return this.preferredMuted;
   }
 
-  /** Apply preferredMuted to the current local stream (after getUserMedia). */
+  /** Apply preferredMuted to local stream tracks and any active PeerConnection senders. */
   private applyPreferredMute(): void {
-    if (!this.localStream) return;
     const muted = this.preferredMuted;
-    this.localStream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+    if (this.localStream) {
+      this.localStream.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+    }
+    const sdh = this.session?.sessionDescriptionHandler as {
+      peerConnection?: RTCPeerConnection;
+      localMediaStream?: MediaStream;
+    } | undefined;
+    const pc = sdh?.peerConnection;
+    if (pc) {
+      pc.getSenders().forEach((sender) => {
+        if (sender.track?.kind === 'audio') sender.track.enabled = !muted;
+      });
+    }
+    // SIP.js keeps its own localMediaStream; keep those track refs in sync too.
+    sdh?.localMediaStream?.getAudioTracks().forEach((t) => { t.enabled = !muted; });
+  }
+
+  /**
+   * Acquire (or reuse) the local mic stream and apply preferred mute before
+   * SIP.js attaches tracks to the PeerConnection.
+   */
+  private async acquireLocalStream(
+    constraints?: MediaStreamConstraints
+  ): Promise<MediaStream> {
+    const live = this.localStream?.getAudioTracks().some((t) => t.readyState === 'live');
+    if (this.localStream && live) {
+      this.applyPreferredMute();
+      return this.localStream;
+    }
+    const stream = await navigator.mediaDevices.getUserMedia(
+      constraints?.audio || constraints?.video
+        ? constraints
+        : {
+            audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+            video: false,
+          }
+    );
+    this.localStream = stream;
+    this.applyPreferredMute();
+    this.callbacks.onLocalStream?.(stream);
+    return stream;
   }
 
   private log(message: string, type: 'info' | 'success' | 'warn' | 'error' = 'info') {
@@ -412,6 +451,12 @@ export class WebPhone {
               }
             }
           : undefined,
+        sessionDescriptionHandlerFactory: Web.defaultSessionDescriptionHandlerFactory(
+          // SIP.js 0.21 ignores any mediaStream passed in invite options and always
+          // calls this factory. Reuse our pre-acquired stream (with preferred mute
+          // already applied) so the PeerConnection never gets a fresh unmuted mic.
+          (constraints) => this.acquireLocalStream(constraints)
+        ),
         sessionDescriptionHandlerFactoryOptions: {
           peerConnectionConfiguration: this.peerConnectionConfiguration,
         },
@@ -612,11 +657,7 @@ export class WebPhone {
     }
 
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      this.applyPreferredMute();
-      this.callbacks.onLocalStream?.(this.localStream);
+      await this.acquireLocalStream();
     } catch (e) {
       this.log('Microphone access denied', 'error');
       this.setCallStatus('Error');
@@ -639,7 +680,6 @@ export class WebPhone {
         earlyMedia: true,
         sessionDescriptionHandlerOptions: {
           constraints: { audio: true, video: false },
-          mediaStream: this.localStream,
           peerConnectionConfiguration: this.peerConnectionConfiguration,
           iceGatheringTimeout: ICE_GATHERING_TIMEOUT_MS,
         } as InviterOptions['sessionDescriptionHandlerOptions'],
@@ -699,11 +739,7 @@ export class WebPhone {
       return;
     }
     try {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      });
-      this.applyPreferredMute();
-      this.callbacks.onLocalStream?.(this.localStream);
+      await this.acquireLocalStream();
     } catch {
       invitation.reject();
       this.resetCallState();
@@ -713,7 +749,6 @@ export class WebPhone {
     const opts: InvitationAcceptOptions = {
       sessionDescriptionHandlerOptions: {
         constraints: { audio: true, video: false },
-        mediaStream: this.localStream,
         peerConnectionConfiguration: this.peerConnectionConfiguration,
         iceGatheringTimeout: ICE_GATHERING_TIMEOUT_MS,
       } as InvitationAcceptOptions['sessionDescriptionHandlerOptions'],

@@ -10,6 +10,7 @@ import {
   ArrowRightLeft,
   Volume2,
   Mic,
+  Grid3x3,
   Signal,
   SignalHigh,
   SignalMedium,
@@ -82,6 +83,7 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
   const [showLog, setShowLog] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferDest, setTransferDest] = useState('');
+  const [showDialpad, setShowDialpad] = useState(false);
   const { micLevel, speakerLevel } = useAudioLevels(localStream, remoteStream);
 
   const inCall = isCallAnswered || isOutgoingRinging || hasActiveCall;
@@ -248,24 +250,26 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
           <span className="softphone-call-using-label">{t('softphone.browser')}</span>
         </div>
 
-        <div className="softphone-dialpad">
-          {DIAL_PAD.map((row, rowIdx) => (
-            <div key={rowIdx} className="softphone-dialpad-row">
-              {row.map(([digit, letters]) => (
-                <button
-                  key={digit}
-                  type="button"
-                  className="softphone-dialpad-key"
-                  onClick={() => addDigit(digit)}
-                  disabled={!isConnected}
-                >
-                  <span className="softphone-dialpad-digit">{digit}</span>
-                  {letters && <span className="softphone-dialpad-letters">{letters}</span>}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
+        {showDialpad && (
+          <div className="softphone-dialpad">
+            {DIAL_PAD.map((row, rowIdx) => (
+              <div key={rowIdx} className="softphone-dialpad-row">
+                {row.map(([digit, letters]) => (
+                  <button
+                    key={digit}
+                    type="button"
+                    className="softphone-dialpad-key"
+                    onClick={() => addDigit(digit)}
+                    disabled={!isConnected}
+                  >
+                    <span className="softphone-dialpad-digit">{digit}</span>
+                    {letters && <span className="softphone-dialpad-letters">{letters}</span>}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+        )}
 
         {isCallAnswered && (
           <div className="softphone-incall-grid softphone-incall-grid--compact">
@@ -356,6 +360,15 @@ export function Softphone({ presence = null }: { presence?: AgentPresence | null
             title={t('softphone.backspace')}
           >
             <Delete size={20} />
+          </button>
+          <button
+            type="button"
+            className={`softphone-bottom-btn ${showDialpad ? 'softphone-bottom-btn-active' : ''}`}
+            onClick={() => setShowDialpad((prev) => !prev)}
+            title={showDialpad ? t('softphone.hideDialpad') : t('softphone.showDialpad')}
+            aria-pressed={showDialpad}
+          >
+            <Grid3x3 size={20} />
           </button>
         </div>
       </div>

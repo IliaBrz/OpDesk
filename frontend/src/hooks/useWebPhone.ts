@@ -481,7 +481,7 @@ export function useWebPhone() {
       setDialNumber('');
       setRemoteStream(null);
       setLocalStream(null);
-      setIsMuted(false);
+      // Keep isMuted — mute preference must survive hangup (idle + next call).
       setIsOnHold(false);
       holdMutedRef.current = false;
     }

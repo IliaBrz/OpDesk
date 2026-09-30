@@ -314,6 +314,8 @@
     "refresh": "Refresh",
     "endCall": "End call",
     "backspace": "Backspace",
+    "showDialpad": "Show dialpad",
+    "hideDialpad": "Hide dialpad",
     "status": {
       "connecting": "Connecting...",
       "registered": "Registered",
