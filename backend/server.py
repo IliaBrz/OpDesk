@@ -4038,12 +4038,21 @@ async def internal_blacklist_check(
 @app.get("/api/blacklist")
 async def api_list_blacklist(
     q: str = "",
+    page: int = 1,
+    page_size: int = 25,
     current_user: dict = Depends(require_supervisor_or_admin),
 ):
-    """List blacklist entries (supervisor/admin). Optional ?q= number substring."""
+    """List blacklist entries (supervisor/admin). Paginated; optional ?q= number substring."""
     q_digits = re.sub(r'\D', '', (q or '').strip()) or None
-    rows = await asyncio.to_thread(list_blacklist, q_digits)
-    return {"items": rows}
+    page = max(1, int(page or 1))
+    page_size = max(1, min(200, int(page_size or 25)))
+    rows, total = await asyncio.to_thread(list_blacklist, q_digits, page, page_size)
+    return {
+        "items": rows,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @app.post("/api/blacklist", status_code=201)

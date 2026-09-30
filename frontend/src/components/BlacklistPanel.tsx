@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Plus, Edit2, Trash2, Ban, CheckCircle2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, Ban, CheckCircle2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { fetchWithAuth } from '../auth';
 import { Modal, Toggle, FormSection, FormRow, FormField, SearchInput } from './ui';
 import { raiseFor } from '../lib/api';
@@ -33,6 +33,7 @@ interface EntryForm {
 }
 
 const REASONS: BlacklistReason[] = ['spam', 'children', 'hooligan', 'security'];
+const ITEMS_PER_PAGE = 25;
 
 function digitsOnly(v: string) {
   return v.replace(/\D/g, '');
@@ -81,11 +82,13 @@ function formFromEntry(e: BlacklistEntry): EntryForm {
 
 /**
  * Supervisor/Admin CRUD for the custom phone blacklist.
- * Unreviewed rows sort first; search filters by number digits.
+ * Server-side pagination (25/page), Call History–style controls.
  */
 export function BlacklistPanel() {
   const { t } = useTranslation();
   const [items, setItems] = useState<BlacklistEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
   const [search, setSearch] = useState('');
   const [modal, setModal] = useState<'create' | 'edit' | 'review' | null>(null);
   const [editing, setEditing] = useState<BlacklistEntry | null>(null);
@@ -94,14 +97,23 @@ export function BlacklistPanel() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async (q?: string) => {
+  const totalPages = Math.max(1, Math.ceil(total / ITEMS_PER_PAGE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIdx = total === 0 ? 0 : (safeCurrentPage - 1) * ITEMS_PER_PAGE;
+  const endIdx = total === 0 ? 0 : Math.min(startIdx + items.length, total);
+
+  const load = useCallback(async (q: string | undefined, page: number) => {
     setLoading(true);
     try {
-      const qs = q ? `?q=${encodeURIComponent(q)}` : '';
-      const res = await fetchWithAuth(`/api/blacklist${qs}`);
+      const params = new URLSearchParams();
+      params.set('page', String(page));
+      params.set('page_size', String(ITEMS_PER_PAGE));
+      if (q) params.set('q', q);
+      const res = await fetchWithAuth(`/api/blacklist?${params.toString()}`);
       if (!res.ok) await raiseFor(res);
       const data = await res.json();
       setItems(data.items || []);
+      setTotal(typeof data.total === 'number' ? data.total : 0);
     } catch {
       /* keep previous rows on transient failure */
     } finally {
@@ -109,12 +121,18 @@ export function BlacklistPanel() {
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load(digitsOnly(search) || undefined, safeCurrentPage);
+  }, [load, search, safeCurrentPage]);
 
   const onSearch = useCallback((q: string) => {
     setSearch(q);
-    load(digitsOnly(q) || undefined);
-  }, [load]);
+    setCurrentPage(1);
+  }, []);
+
+  const reload = useCallback(() => {
+    load(digitsOnly(search) || undefined, safeCurrentPage);
+  }, [load, search, safeCurrentPage]);
 
   const openCreate = () => {
     setForm(blankForm());
@@ -164,6 +182,7 @@ export function BlacklistPanel() {
           }),
         });
         if (!res.ok) await raiseFor(res);
+        setCurrentPage(1);
       } else if (modal === 'edit' && editing) {
         const res = await fetchWithAuth(`/api/blacklist/${editing.id}`, {
           method: 'PUT',
@@ -193,7 +212,7 @@ export function BlacklistPanel() {
         if (!res.ok) await raiseFor(res);
       }
       setModal(null);
-      load(digitsOnly(search) || undefined);
+      reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : t('blacklist.saveFailed', 'Save failed'));
     } finally {
@@ -204,7 +223,14 @@ export function BlacklistPanel() {
   const remove = async (e: BlacklistEntry) => {
     if (!window.confirm(t('blacklist.confirmDelete', { number: e.number }))) return;
     const res = await fetchWithAuth(`/api/blacklist/${e.id}`, { method: 'DELETE' });
-    if (res.ok) load(digitsOnly(search) || undefined);
+    if (res.ok) {
+      // If we deleted the last item on a page > 1, step back.
+      if (items.length <= 1 && safeCurrentPage > 1) {
+        setCurrentPage((p) => Math.max(1, p - 1));
+      } else {
+        reload();
+      }
+    }
   };
 
   const reasonLabel = (r: BlacklistReason) => t(`blacklist.reasons.${r}`, r);
@@ -264,7 +290,7 @@ export function BlacklistPanel() {
             {items.map((row) => {
               const pending = !row.reviewed_at;
               return (
-                <tr key={row.id} className={pending ? undefined : undefined} style={pending ? { background: 'var(--bg-secondary)' } : undefined}>
+                <tr key={row.id} style={pending ? { background: 'var(--bg-secondary)' } : undefined}>
                   <td className="notes-cell-strong" dir="ltr">{row.id}</td>
                   <td dir="ltr" style={{ fontFamily: 'JetBrains Mono, monospace' }}>{row.number}</td>
                   <td>{reasonLabel(row.reason)}</td>
@@ -317,6 +343,40 @@ export function BlacklistPanel() {
           </tbody>
         </table>
       </div>
+
+      {!loading && total > 0 && (
+        <div className="cl-pagination">
+          <span className="cl-pagination-info">
+            {t('blacklist.showing', {
+              start: startIdx + 1,
+              end: endIdx,
+              total,
+              defaultValue: `Showing ${startIdx + 1} to ${endIdx} of ${total}`,
+            })}
+          </span>
+          <div className="cl-pagination-controls">
+            <button
+              type="button"
+              className="btn cl-page-btn"
+              disabled={safeCurrentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            >
+              <ChevronLeft size={16} />
+              {t('blacklist.previous', 'Previous')}
+            </button>
+            <span className="cl-page-current">{safeCurrentPage}</span>
+            <button
+              type="button"
+              className="btn cl-page-btn"
+              disabled={safeCurrentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            >
+              {t('blacklist.next', 'Next')}
+              <ChevronRight size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       <Modal
         open={!!modal}

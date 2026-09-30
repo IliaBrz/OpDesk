@@ -3412,14 +3412,29 @@ def _blacklist_row_to_dict(row: dict) -> dict:
     return out
 
 
-def list_blacklist(number_q: Optional[str] = None) -> list:
-    """Active + pending blacklist rows. Unreviewed first, then newest id."""
+def list_blacklist(
+    number_q: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 25,
+) -> Tuple[list, int]:
+    """Blacklist rows with total count. Unreviewed first, then newest id.
+    Returns (page_rows, total)."""
+    page = max(1, int(page or 1))
+    page_size = max(1, min(200, int(page_size or 25)))
+    offset = (page - 1) * page_size
     config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_OpDesk', 'OpDesk'))
     conn = None
     cursor = None
     try:
         conn = mysql.connector.connect(**config)
         cursor = conn.cursor(dictionary=True)
+        where = ""
+        params: list = []
+        if number_q:
+            where = "WHERE b.number LIKE %s "
+            params.append(f"%{number_q}%")
+        cursor.execute(f"SELECT COUNT(*) AS cnt FROM blacklist b {where}", params)
+        total = int((cursor.fetchone() or {}).get('cnt') or 0)
         sql = (
             "SELECT b.id, b.number, b.reason, b.comment, b.inbound, b.outbound, "
             "b.creator_id, b.reviewer_id, b.created_at, b.reviewed_at, b.unblock_at, "
@@ -3427,19 +3442,16 @@ def list_blacklist(number_q: Optional[str] = None) -> list:
             "FROM blacklist b "
             "LEFT JOIN users cu ON cu.id = b.creator_id "
             "LEFT JOIN users ru ON ru.id = b.reviewer_id "
+            f"{where}"
+            "ORDER BY (b.reviewed_at IS NULL) DESC, b.id DESC "
+            "LIMIT %s OFFSET %s"
         )
-        params: list = []
-        if number_q:
-            sql += "WHERE b.number LIKE %s "
-            params.append(f"%{number_q}%")
-        sql += (
-            "ORDER BY (b.reviewed_at IS NULL) DESC, b.id DESC"
-        )
-        cursor.execute(sql, params)
-        return [_blacklist_row_to_dict(r) for r in (cursor.fetchall() or [])]
+        cursor.execute(sql, params + [page_size, offset])
+        rows = [_blacklist_row_to_dict(r) for r in (cursor.fetchall() or [])]
+        return rows, total
     except Error as e:
         log.warning(f"⚠️  Database error list_blacklist: {e}")
-        return []
+        return [], 0
     finally:
         _safe_close(cursor, conn)
 
