@@ -192,6 +192,7 @@
     "download": "Descargar",
     "na": "N/D",
     "table": {
+      "id": "ID",
       "src": "Origen",
       "dest": "Destino",
       "app": "Aplicación",

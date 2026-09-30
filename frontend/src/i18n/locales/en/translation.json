@@ -196,6 +196,7 @@
     "download": "Download",
     "na": "N/A",
     "table": {
+      "id": "ID",
       "src": "Src",
       "dest": "Dest",
       "app": "App",

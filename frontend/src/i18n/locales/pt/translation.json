@@ -192,6 +192,7 @@
     "download": "Baixar",
     "na": "N/D",
     "table": {
+      "id": "ID",
       "src": "Origem",
       "dest": "Destino",
       "app": "Aplicativo",

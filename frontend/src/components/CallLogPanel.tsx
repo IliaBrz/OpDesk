@@ -1088,17 +1088,18 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
           <table className="cl-table">
             <thead>
               <tr>
-                <th>{t('callLog.table.src')}</th>
-                <th>{t('callLog.table.dest')}</th>
-                <th>{t('callLog.table.app')}</th>
+                <th className="cl-col-id">{t('callLog.table.id')}</th>
+                <th>{t('callLog.table.dateTime')}</th>
                 <th>{t('callLog.table.direction')}</th>
                 <th>{t('callLog.table.status')}</th>
+                <th>{t('callLog.table.src')}</th>
+                <th>{t('callLog.table.dest')}</th>
                 <th>{t('callLog.table.agent')}</th>
                 <th>{t('callLog.table.duration')}</th>
                 <th>{t('callLog.table.talk')}</th>
                 <th>{t('callLog.table.recording')}</th>
-                <th>{t('callLog.table.dateTime')}</th>
                 <th>{t('callLog.table.callJourney')}</th>
+                <th>{t('callLog.table.app')}</th>
                 <th>{t('callLog.table.qos')}</th>
               </tr>
             </thead>
@@ -1108,16 +1109,17 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                 const stLabel = t(`callLog.status.${call.status}`, { defaultValue: call.status });
                 const dt = formatCallDate(call.calldate, t);
                 const hasQos = !!parseQoS(call.QoS);
+                const rowId = startIdx + idx + 1;
 
                 return (
-                  <tr key={`${call.calldate}-${idx}`} className={idx % 2 === 0 ? 'cl-row-even' : 'cl-row-odd'}>
-                    <td data-label={t('callLog.table.src')}>
-                      <CopyablePhone className="cl-phone" value={call.src} />
+                  <tr key={`${call.calldate}-${rowId}`} className={idx % 2 === 0 ? 'cl-row-even' : 'cl-row-odd'}>
+                    <td className="cl-col-id" data-label={t('callLog.table.id')}>{rowId}</td>
+                    <td data-label={t('callLog.table.dateTime')}>
+                      <div className="cl-datetime">
+                        <span className="cl-date">{dt.date}</span>
+                        <span className="cl-time">{dt.time}</span>
+                      </div>
                     </td>
-                    <td data-label={t('callLog.table.dest')}>
-                      <CopyablePhone className="cl-phone" value={call.dst} />
-                    </td>
-                    <td data-label={t('callLog.table.app')}>{call.app || '—'}</td>
                     <td data-label={t('callLog.table.direction')}>
                       {call.is_supervision ? (
                         <span className="cl-direction cl-direction-supervision">
@@ -1145,6 +1147,12 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                         {stLabel}
                       </span>
                     </td>
+                    <td data-label={t('callLog.table.src')}>
+                      <CopyablePhone className="cl-phone" value={call.src} />
+                    </td>
+                    <td data-label={t('callLog.table.dest')}>
+                      <CopyablePhone className="cl-phone" value={call.dst} />
+                    </td>
                     <td data-label={t('callLog.table.agent')}>{call.extension || '—'}</td>
                     <td data-label={t('callLog.table.duration')}>
                       <span className="cl-duration">{formatDuration(call.duration)}</span>
@@ -1159,12 +1167,6 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                         calldate={call.calldate}
                         onVadClick={call.uniqueid ? () => handleOpenVad(call) : undefined}
                       />
-                    </td>
-                    <td data-label={t('callLog.table.dateTime')}>
-                      <div className="cl-datetime">
-                        <span className="cl-date">{dt.date}</span>
-                        <span className="cl-time">{dt.time}</span>
-                      </div>
                     </td>
                     <td data-label={t('callLog.table.callJourney')}>
                       {(call.call_journey_count != null && call.call_journey_count > 1) ? (
@@ -1181,6 +1183,7 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                         <span className="cl-no-qos">—</span>
                       )}
                     </td>
+                    <td data-label={t('callLog.table.app')}>{call.app || '—'}</td>
                     <td data-label={t('callLog.table.qos')}>
                       {hasQos ? (
                         <button

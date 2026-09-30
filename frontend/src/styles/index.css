@@ -3652,7 +3652,7 @@ select.an-filter-select option:checked {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  min-width: 1200px;
+  min-width: 1280px;
 }
 
 .cl-table th {
@@ -3677,6 +3677,14 @@ select.an-filter-select option:checked {
   color: var(--text-primary);
   border-bottom: 1px solid var(--border-subtle);
   vertical-align: middle;
+}
+
+.cl-table .cl-col-id {
+  width: 1%;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  text-align: right;
 }
 
 .cl-row-even {
@@ -7319,7 +7327,7 @@ select.an-filter-select option:checked {
 .lg-jump { font-size: var(--text-xs); padding: 3px 8px; }
 
 /* ── Deliveries table ── */
-/* .cl-table forces min-width:1200px for the call log's 12 columns; these tables are
+/* .cl-table forces min-width:1280px for the call log's 13 columns; these tables are
    narrower, so relax it rather than forcing a horizontal scrollbar. */
 .lg-table, .ak-table { min-width: 860px; }
 
