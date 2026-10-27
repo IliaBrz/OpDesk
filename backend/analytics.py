@@ -1425,7 +1425,12 @@ def compute_queue_abandonment(
         want = 'Restored' if disp_f == 'restored' else 'Abandoned'
         rows = [r for r in rows if r['disposition'] == want]
 
-    rows.sort(key=lambda r: r['date'] or '', reverse=True)
+    # Abandoned first; within each disposition, newest first (ISO date descending).
+    abandoned = [r for r in rows if r['disposition'] == 'Abandoned']
+    restored = [r for r in rows if r['disposition'] != 'Abandoned']
+    abandoned.sort(key=lambda r: r.get('date') or '', reverse=True)
+    restored.sort(key=lambda r: r.get('date') or '', reverse=True)
+    rows = abandoned + restored
     total = len(rows)
     page = max(1, int(page or 1))
     page_size = min(200, max(1, int(page_size or 50)))
