@@ -267,6 +267,16 @@ export interface AnalyticsDrilldownRecord {
   direction?: string;
 }
 
+export interface AnalyticsQueueAbandonmentRecord {
+  date: string | null;
+  caller: string;
+  destination: string;
+  abandoned_count: number;
+  max_duration_secs: number;
+  disposition: 'Abandoned' | 'Restored' | string;
+  restoring_speed_secs: number | null;
+}
+
 export interface AnalyticsSettings {
   sla_thresholds: Record<string, number>;
   sla_default_secs: number;

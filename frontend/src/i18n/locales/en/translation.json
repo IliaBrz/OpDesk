@@ -657,7 +657,8 @@
       "queues": "Queue Performance",
       "agents": "Agent Performance",
       "adherence": "Adherence",
-      "drilldown": "Drilldown"
+      "drilldown": "Drilldown",
+      "queueAbandonment": "Queue Abandonment"
     },
     "period": {
       "today": "Today",
@@ -744,6 +745,27 @@
       "disposition": "Disposition",
       "slaMet": "SLA Met",
       "slaFailed": "SLA Miss",
+      "page": "Page",
+      "exportCsv": "Export CSV",
+      "exportXlsx": "Export XLSX",
+      "exporting": "Exporting...",
+      "exportFailed": "Export failed. Please try again.",
+      "clearFilters": "Clear"
+    },
+    "abandonment": {
+      "filterQueue": "Queue...",
+      "allDispositions": "All Statuses",
+      "abandoned": "Abandoned",
+      "restored": "Restored",
+      "records": "records",
+      "empty": "No abandoned queue callers for this period",
+      "date": "Date",
+      "caller": "Caller",
+      "destination": "Destination",
+      "abandonedCount": "Number of Abandoned",
+      "maxDuration": "Max Duration",
+      "disposition": "Disposition",
+      "restoringSpeed": "Restoring Speed",
       "page": "Page",
       "exportCsv": "Export CSV",
       "exportXlsx": "Export XLSX",

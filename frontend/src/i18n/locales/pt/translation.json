@@ -653,7 +653,8 @@
       "queues": "Desempenho de filas",
       "agents": "Desempenho de agentes",
       "adherence": "Aderência",
-      "drilldown": "Explorador"
+      "drilldown": "Explorador",
+      "queueAbandonment": "Abandono de fila"
     },
     "period": {
       "today": "Hoje",
@@ -738,6 +739,27 @@
       "disposition": "Disposição",
       "slaMet": "SLA cumprido",
       "slaFailed": "SLA não cumprido",
+      "page": "Página",
+      "exportCsv": "Exportar CSV",
+      "exportXlsx": "Exportar XLSX",
+      "exporting": "Exportando...",
+      "exportFailed": "Falha na exportação. Tente novamente.",
+      "clearFilters": "Limpar"
+    },
+    "abandonment": {
+      "filterQueue": "Fila...",
+      "allDispositions": "Todos os status",
+      "abandoned": "Abandonada",
+      "restored": "Restaurada",
+      "records": "registros",
+      "empty": "Nenhuma chamada abandonada na fila neste período",
+      "date": "Data",
+      "caller": "Chamante",
+      "destination": "Destino",
+      "abandonedCount": "N.º de abandonos",
+      "maxDuration": "Duração máx.",
+      "disposition": "Disposição",
+      "restoringSpeed": "Velocidade de restauração",
       "page": "Página",
       "exportCsv": "Exportar CSV",
       "exportXlsx": "Exportar XLSX",

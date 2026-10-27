@@ -1214,6 +1214,231 @@ def compute_drilldown(
 
 
 # ---------------------------------------------------------------------------
+# Queue abandonment (Caller + Destination aggregates)
+# ---------------------------------------------------------------------------
+
+def _phone_digits(value) -> str:
+    return ''.join(c for c in str(value or '') if c.isdigit())
+
+
+def _phones_match(a: str, b: str) -> bool:
+    """Match PSTN-style numbers by digits; avoid loose suffix matches on short internals."""
+    da, db = _phone_digits(a), _phone_digits(b)
+    if not da or not db:
+        return False
+    if da == db:
+        return True
+    # Long numbers: allow common trunk/prefix differences via suffix.
+    if len(da) >= 10 and len(db) >= 10:
+        return da.endswith(db) or db.endswith(da)
+    return False
+
+
+def _as_dt(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date_type) and not isinstance(value, datetime):
+        return datetime(value.year, value.month, value.day)
+    try:
+        return datetime.fromisoformat(str(value).replace('Z', '+00:00').split('+')[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def compute_queue_abandonment(
+    date_from: str = None,
+    date_to: str = None,
+    queue_ext: str = None,
+    disposition_filter: str = None,
+    page: int = 1,
+    page_size: int = 50,
+    allowed_queues=None,
+) -> dict:
+    """
+    Aggregate abandoned queue calls by (caller, destination/queue).
+
+    Disposition Restored when:
+      1) any OUT attempt to the caller after the row's first abandon (marks ALL
+         rows for that caller Restored), or
+      2) an answered IN from the caller into the same queue after first abandon
+         (marks only that Caller+Destination row).
+    """
+    from call_log import call_log
+
+    date_from, date_to = _default_dates(date_from, date_to)
+    all_rows = call_log(date_from=date_from, date_to=date_to, enrich=False)
+
+    allowed_q = None
+    if allowed_queues is not None:
+        allowed_q = set(str(q) for q in allowed_queues)
+
+    # Bucket queue abandons: IN + queue app + no talk.
+    abandon_groups = {}  # (caller_digits, queue) -> agg
+    for r in all_rows:
+        if r.get('call_type') != 'IN':
+            continue
+        dst = str(r.get('dst') or '')
+        if not dst.isdigit():
+            continue
+        app = str(r.get('app') or '').lower()
+        if app and app != 'queue':
+            continue
+        if allowed_q is not None and dst not in allowed_q:
+            continue
+        if queue_ext and dst != str(queue_ext):
+            continue
+        talk = int(r.get('talk') or 0)
+        disp = str(r.get('disposition') or '').upper()
+        if talk > 0 or disp == 'ANSWERED':
+            continue
+
+        caller_raw = str(r.get('src') or '')
+        caller_key = _phone_digits(caller_raw)
+        if not caller_key:
+            continue
+
+        cd = _as_dt(r.get('calldate'))
+        if cd is None:
+            continue
+        duration = int(r.get('duration') or 0)
+        wait = max(0, duration - talk)
+
+        key = (caller_key, dst)
+        g = abandon_groups.get(key)
+        if g is None:
+            abandon_groups[key] = {
+                'caller': caller_raw,
+                'caller_key': caller_key,
+                'destination': dst,
+                'first_abandon': cd,
+                'abandoned_count': 1,
+                'max_duration_secs': wait,
+            }
+        else:
+            g['abandoned_count'] += 1
+            if wait > g['max_duration_secs']:
+                g['max_duration_secs'] = wait
+            if cd < g['first_abandon']:
+                g['first_abandon'] = cd
+                g['caller'] = caller_raw  # prefer number from earliest abandon
+
+    if not abandon_groups:
+        return {'rows': [], 'total': 0, 'page': page, 'page_size': page_size}
+
+    # Index OUT attempts and answered IN (same queues) for restore matching.
+    outs_by_dst_digits = []  # (digits, dt) for OUT dst
+    answered_in = []  # (src_digits, queue_dst, dt)
+    for r in all_rows:
+        cd = _as_dt(r.get('calldate'))
+        if cd is None:
+            continue
+        ct = r.get('call_type')
+        if ct == 'OUT':
+            dst_digits = _phone_digits(r.get('dst'))
+            if dst_digits:
+                outs_by_dst_digits.append((dst_digits, cd))
+        elif ct == 'IN':
+            talk = int(r.get('talk') or 0)
+            disp = str(r.get('disposition') or '').upper()
+            if talk <= 0 and disp != 'ANSWERED':
+                continue
+            q = str(r.get('dst') or '')
+            if not q.isdigit():
+                continue
+            src_digits = _phone_digits(r.get('src'))
+            if not src_digits:
+                continue
+            answered_in.append((src_digits, q, cd))
+
+    # Precompute earliest OUT per abandon caller_key (match via _phones_match).
+    caller_keys = {k[0] for k in abandon_groups}
+    outs_for_caller = defaultdict(list)  # caller_key -> [dt, ...]
+    for dst_digits, cd in outs_by_dst_digits:
+        for ck in caller_keys:
+            if _phones_match(ck, dst_digits):
+                outs_for_caller[ck].append(cd)
+    for ck in outs_for_caller:
+        outs_for_caller[ck].sort()
+
+    answered_for_pair = defaultdict(list)  # (caller_key, queue) -> [dt]
+    for src_digits, q, cd in answered_in:
+        for ck, dst in abandon_groups:
+            if dst != q:
+                continue
+            if _phones_match(ck, src_digits):
+                answered_for_pair[(ck, dst)].append(cd)
+    for k in answered_for_pair:
+        answered_for_pair[k].sort()
+
+    # Callers that have at least one OUT after their earliest abandon → propagate Restored.
+    caller_earliest_abandon = {}
+    for (ck, _dst), g in abandon_groups.items():
+        prev = caller_earliest_abandon.get(ck)
+        if prev is None or g['first_abandon'] < prev:
+            caller_earliest_abandon[ck] = g['first_abandon']
+
+    callers_restored_by_out = set()
+    for ck, earliest in caller_earliest_abandon.items():
+        for t in outs_for_caller.get(ck, []):
+            if t > earliest:
+                callers_restored_by_out.add(ck)
+                break
+
+    rows = []
+    for (ck, dst), g in abandon_groups.items():
+        first = g['first_abandon']
+        restore_times = []
+
+        for t in outs_for_caller.get(ck, []):
+            if t > first:
+                restore_times.append(t)
+                break  # earliest OUT after this row
+
+        for t in answered_for_pair.get((ck, dst), []):
+            if t > first:
+                restore_times.append(t)
+                break
+
+        restored = bool(restore_times) or (ck in callers_restored_by_out)
+        restore_at = min(restore_times) if restore_times else None
+        # Propagated OUT restore with no OUT after this row's first abandon:
+        # still Restored; speed only if we have a restore_at.
+        speed = None
+        if restore_at is not None:
+            speed = max(0, int((restore_at - first).total_seconds()))
+
+        disposition = 'Restored' if restored else 'Abandoned'
+        rows.append({
+            'date': first.isoformat(sep=' '),
+            'caller': g['caller'],
+            'destination': dst,
+            'abandoned_count': g['abandoned_count'],
+            'max_duration_secs': g['max_duration_secs'],
+            'disposition': disposition,
+            'restoring_speed_secs': speed,
+        })
+
+    disp_f = (disposition_filter or '').strip().lower()
+    if disp_f in ('abandoned', 'restored'):
+        want = 'Restored' if disp_f == 'restored' else 'Abandoned'
+        rows = [r for r in rows if r['disposition'] == want]
+
+    rows.sort(key=lambda r: r['date'] or '', reverse=True)
+    total = len(rows)
+    page = max(1, int(page or 1))
+    page_size = min(200, max(1, int(page_size or 50)))
+    start = (page - 1) * page_size
+    return {
+        'rows': rows[start:start + page_size],
+        'total': total,
+        'page': page,
+        'page_size': page_size,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Volume trend (daily call counts for the period)
 # ---------------------------------------------------------------------------
 

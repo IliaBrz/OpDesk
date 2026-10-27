@@ -653,7 +653,8 @@
       "queues": "أداء الطوابير",
       "agents": "أداء الموظف",
       "adherence": "الالتزام",
-      "drilldown": "استعراض تفصيلي"
+      "drilldown": "استعراض تفصيلي",
+      "queueAbandonment": "التخلي عن الطابور"
     },
     "period": {
       "today": "اليوم",
@@ -740,6 +741,27 @@
       "disposition": "الحالة",
       "slaMet": "مستوف للمعيار",
       "slaFailed": "غير مستوفٍ",
+      "page": "صفحة",
+      "exportCsv": "تصدير CSV",
+      "exportXlsx": "تصدير XLSX",
+      "exporting": "جارٍ التصدير...",
+      "exportFailed": "فشل التصدير. يرجى المحاولة مرة أخرى.",
+      "clearFilters": "مسح"
+    },
+    "abandonment": {
+      "filterQueue": "الطابور...",
+      "allDispositions": "جميع الحالات",
+      "abandoned": "مهجور",
+      "restored": "مُستعاد",
+      "records": "سجلات",
+      "empty": "لا توجد مكالمات مهجورة في الطابور لهذه الفترة",
+      "date": "التاريخ",
+      "caller": "المتصل",
+      "destination": "الوجهة",
+      "abandonedCount": "عدد المهجورات",
+      "maxDuration": "أقصى مدة",
+      "disposition": "الحالة",
+      "restoringSpeed": "سرعة الاستعادة",
       "page": "صفحة",
       "exportCsv": "تصدير CSV",
       "exportXlsx": "تصدير XLSX",

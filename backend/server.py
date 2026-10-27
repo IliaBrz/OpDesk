@@ -4861,6 +4861,114 @@ async def analytics_drilldown(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@app.get("/api/analytics/queue-abandonment")
+async def analytics_queue_abandonment(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    queue: Optional[str] = None,
+    disposition: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+    current_user: dict = Depends(require_scope("analytics:read")),
+):
+    """Abandoned queue callers aggregated by Caller+Destination. Roles: admin, supervisor."""
+    try:
+        allowed_queues, _ = _analytics_scope(current_user)
+        return analytics_module.compute_queue_abandonment(
+            date_from, date_to,
+            queue_ext=queue,
+            disposition_filter=disposition,
+            page=max(1, page),
+            page_size=min(200, max(1, page_size)),
+            allowed_queues=allowed_queues,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"analytics queue-abandonment error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.get("/api/analytics/queue-abandonment/export")
+async def analytics_queue_abandonment_export(
+    format: str = "csv",
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    queue: Optional[str] = None,
+    disposition: Optional[str] = None,
+    current_user: dict = Depends(require_scope("analytics:read")),
+):
+    """Export queue-abandonment rows as CSV or XLSX. Roles: admin, supervisor."""
+    from fastapi.responses import StreamingResponse
+    from io import BytesIO, StringIO
+
+    try:
+        allowed_queues, _ = _analytics_scope(current_user)
+        result = analytics_module.compute_queue_abandonment(
+            date_from, date_to,
+            queue_ext=queue,
+            disposition_filter=disposition,
+            page=1,
+            page_size=100000,
+            allowed_queues=allowed_queues,
+        )
+        rows = result.get('rows', [])
+        date_label = f"{date_from or 'all'}_{date_to or 'all'}"
+        headers_row = [
+            'Date', 'Caller', 'Destination', 'Number of Abandoned',
+            'Max Duration(s)', 'Disposition', 'Restoring Speed(s)',
+        ]
+
+        def row_values(r):
+            return [
+                r.get('date', ''),
+                r.get('caller', ''),
+                r.get('destination', ''),
+                r.get('abandoned_count', ''),
+                r.get('max_duration_secs', ''),
+                r.get('disposition', ''),
+                '' if r.get('restoring_speed_secs') is None else r.get('restoring_speed_secs'),
+            ]
+
+        if format.lower() == 'xlsx':
+            try:
+                import openpyxl
+                wb = openpyxl.Workbook()
+                ws = wb.active
+                ws.title = "Queue Abandonment"
+                ws.append(headers_row)
+                for r in rows:
+                    ws.append(row_values(r))
+                buf = BytesIO()
+                wb.save(buf)
+                buf.seek(0)
+                return StreamingResponse(
+                    buf,
+                    media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": f'attachment; filename="queue_abandonment_{date_label}.xlsx"'}
+                )
+            except ImportError:
+                raise HTTPException(status_code=500, detail="openpyxl not installed; use CSV export")
+        else:
+            buf = StringIO()
+            buf.write('\ufeff')
+            buf.write(','.join(headers_row) + '\r\n')
+            for r in rows:
+                vals = [str(v).replace('"', '""') for v in row_values(r)]
+                buf.write(','.join(f'"{v}"' for v in vals) + '\r\n')
+            csv_bytes = buf.getvalue().encode('utf-8')
+            return StreamingResponse(
+                BytesIO(csv_bytes),
+                media_type="text/csv; charset=utf-8",
+                headers={"Content-Disposition": f'attachment; filename="queue_abandonment_{date_label}.csv"'}
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error(f"analytics queue-abandonment export error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @app.get("/api/analytics/export")
 async def analytics_export(
     format: str = "csv",

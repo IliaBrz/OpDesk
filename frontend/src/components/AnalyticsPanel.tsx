@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BarChart3, LayoutDashboard, Users, ListFilter, Layers, UserCheck } from 'lucide-react';
+import { BarChart3, LayoutDashboard, Users, ListFilter, Layers, UserCheck, PhoneMissed } from 'lucide-react';
 import { Page, Tabs } from './ui';
 import '../styles/analytics.css';
 import { AnalyticsOverview } from './AnalyticsOverview';
@@ -8,11 +8,12 @@ import { AnalyticsQueues } from './AnalyticsQueues';
 import { AnalyticsAgents } from './AnalyticsAgents';
 import { AnalyticsAdherence } from './AnalyticsAdherence';
 import { AnalyticsDrilldown } from './AnalyticsDrilldown';
+import { AnalyticsQueueAbandonment } from './AnalyticsQueueAbandonment';
 import { PageRange } from './PageRange';
 import { type DateRange } from './analyticsUtils';
 
 export type { DateRange };
-export type AnalyticsTab = 'overview' | 'queues' | 'agents' | 'adherence' | 'drilldown';
+export type AnalyticsTab = 'overview' | 'queues' | 'agents' | 'adherence' | 'drilldown' | 'queue-abandonment';
 
 interface AnalyticsPanelProps {
   dateRange: DateRange;
@@ -29,6 +30,7 @@ export function AnalyticsPanel({ dateRange, onDateRangeChange }: AnalyticsPanelP
     { key: 'agents',    label: t('analytics.nav.agents'),    icon: <Users size={13} /> },
     { key: 'adherence', label: t('analytics.nav.adherence'), icon: <UserCheck size={13} /> },
     { key: 'drilldown', label: t('analytics.nav.drilldown'), icon: <ListFilter size={13} /> },
+    { key: 'queue-abandonment', label: t('analytics.nav.queueAbandonment'), icon: <PhoneMissed size={13} /> },
   ];
 
   return (
@@ -46,6 +48,7 @@ export function AnalyticsPanel({ dateRange, onDateRangeChange }: AnalyticsPanelP
         {tab === 'agents'    && <AnalyticsAgents    dateRange={dateRange} />}
         {tab === 'adherence' && <AnalyticsAdherence dateRange={dateRange} />}
         {tab === 'drilldown' && <AnalyticsDrilldown dateRange={dateRange} />}
+        {tab === 'queue-abandonment' && <AnalyticsQueueAbandonment dateRange={dateRange} />}
       </div>
     </Page>
   );
