@@ -6,6 +6,7 @@ import type { DateRange } from './analyticsUtils';
 import type { AnalyticsQueueAbandonmentRecord } from '../types';
 import { fmtSecs, analyticsGet, useAnalyticsFetch } from './analyticsUtils';
 import { FilterSelect } from './FilterSelect';
+import { CopyablePhone } from './CopyablePhone';
 
 type AbandonmentResponse = { rows: AnalyticsQueueAbandonmentRecord[]; total: number };
 
@@ -165,7 +166,9 @@ export function AnalyticsQueueAbandonment({ dateRange }: Props) {
                     <td className="sticky muted" style={{ whiteSpace: 'nowrap', fontSize: '0.77rem' }}>
                       {fmtDate(r.date)}
                     </td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.caller || '—'}</td>
+                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>
+                      <CopyablePhone value={r.caller} />
+                    </td>
                     <td style={{ fontVariantNumeric: 'tabular-nums' }}>{r.destination || '—'}</td>
                     <td className="num">{r.abandoned_count}</td>
                     <td className="num">{fmtSecs(r.max_duration_secs)}</td>
