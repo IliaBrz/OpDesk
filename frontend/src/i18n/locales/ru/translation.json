@@ -656,7 +656,8 @@
       "queues": "Очереди",
       "agents": "Операторы",
       "adherence": "Дисциплина",
-      "drilldown": "Детализация"
+      "drilldown": "Детализация",
+      "queueAbandonment": "Пропуски в очередях"
     },
     "period": {
       "today": "Сегодня",
@@ -756,6 +757,27 @@
       "noAnswer": "Без ответа",
       "busy": "Занято",
       "failed": "Ошибка"
+    },
+    "abandonment": {
+      "filterQueue": "Очередь…",
+      "allDispositions": "Все статусы",
+      "abandoned": "Пропущен",
+      "restored": "Восстановлен",
+      "records": "записей",
+      "empty": "Нет пропущенных в очередях за период",
+      "date": "Дата",
+      "caller": "Звонящий",
+      "destination": "Назначение",
+      "abandonedCount": "Число пропусков",
+      "maxDuration": "Макс. ожидание",
+      "disposition": "Статус",
+      "restoringSpeed": "Скорость восстановления",
+      "page": "Стр.",
+      "exportCsv": "Экспорт CSV",
+      "exportXlsx": "Экспорт XLSX",
+      "exporting": "Экспорт…",
+      "exportFailed": "Ошибка экспорта. Попробуйте ещё раз.",
+      "clearFilters": "Сбросить"
     },
     "settings": {
       "title": "Аналитика",

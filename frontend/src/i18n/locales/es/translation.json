@@ -652,7 +652,8 @@
       "queues": "Rendimiento de colas",
       "agents": "Rendimiento de agentes",
       "adherence": "Adherencia",
-      "drilldown": "Explorador"
+      "drilldown": "Explorador",
+      "queueAbandonment": "Abandono de cola"
     },
     "period": {
       "today": "Hoy",
@@ -737,6 +738,27 @@
       "disposition": "Disposición",
       "slaMet": "SLA cumplido",
       "slaFailed": "SLA incumplido",
+      "page": "Página",
+      "exportCsv": "Exportar CSV",
+      "exportXlsx": "Exportar XLSX",
+      "exporting": "Exportando...",
+      "exportFailed": "Error al exportar. Inténtelo de nuevo.",
+      "clearFilters": "Limpiar"
+    },
+    "abandonment": {
+      "filterQueue": "Cola...",
+      "allDispositions": "Todos los estados",
+      "abandoned": "Abandonada",
+      "restored": "Restaurada",
+      "records": "registros",
+      "empty": "No hay llamadas abandonadas en cola en este período",
+      "date": "Fecha",
+      "caller": "Llamante",
+      "destination": "Destino",
+      "abandonedCount": "N.º de abandonos",
+      "maxDuration": "Duración máx.",
+      "disposition": "Disposición",
+      "restoringSpeed": "Velocidad de restauración",
       "page": "Página",
       "exportCsv": "Exportar CSV",
       "exportXlsx": "Exportar XLSX",
