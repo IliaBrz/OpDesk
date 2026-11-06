@@ -3652,7 +3652,7 @@ select.an-filter-select option:checked {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  min-width: 1280px;
+  min-width: 1360px;
 }
 
 .cl-table th {

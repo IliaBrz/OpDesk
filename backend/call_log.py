@@ -426,10 +426,14 @@ def call_log(limit=None, date=None, date_from=None, date_to=None, allowed_extens
                                   answered=bool(cdr.get('billsec')))
 
         # Create a new dict with only the fields you want
+        did_raw = cdr.get('did')
+        did = str(did_raw).strip() if did_raw not in (None, '') else ''
+
         filtered_cdr = {
             'calldate': cdr.get('calldate'),
             'src': cdr.get('src'),
             'dst': cdr.get('dst'),
+            'did': did or None,
             'phone_number': phone_number,
             'customer_name': cdr.get('cnam') or None,
             'duration': cdr.get('duration'),

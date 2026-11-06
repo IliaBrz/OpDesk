@@ -199,6 +199,7 @@
     "table": {
       "id": "ID",
       "src": "Src",
+      "did": "DID",
       "dest": "Dest",
       "app": "App",
       "direction": "Direction",

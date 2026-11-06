@@ -1093,6 +1093,7 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                 <th>{t('callLog.table.direction')}</th>
                 <th>{t('callLog.table.status')}</th>
                 <th>{t('callLog.table.src')}</th>
+                <th>{t('callLog.table.did')}</th>
                 <th>{t('callLog.table.dest')}</th>
                 <th>{t('callLog.table.agent')}</th>
                 <th>{t('callLog.table.duration')}</th>
@@ -1149,6 +1150,9 @@ export function CallLogPanel({ dateRange, onDateRangeChange }: CallLogPanelProps
                     </td>
                     <td data-label={t('callLog.table.src')}>
                       <CopyablePhone className="cl-phone" value={call.src} />
+                    </td>
+                    <td data-label={t('callLog.table.did')}>
+                      <CopyablePhone className="cl-phone" value={call.did} />
                     </td>
                     <td data-label={t('callLog.table.dest')}>
                       <CopyablePhone className="cl-phone" value={call.dst} />

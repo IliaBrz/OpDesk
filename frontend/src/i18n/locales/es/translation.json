@@ -195,6 +195,7 @@
     "table": {
       "id": "ID",
       "src": "Origen",
+      "did": "DID",
       "dest": "Destino",
       "app": "Aplicación",
       "direction": "Dirección",
