@@ -128,6 +128,24 @@ def _queue_member_status(code: str) -> str:
 # Compiled regex patterns for better performance
 _RE_EXT_FROM_CHANNEL = re.compile(r'/(\d+)-')
 _RE_CHANNEL_TYPE = re.compile(r'/([^-]+)-')
+# Queue member Interface/Location must look like a real channel technology.
+# Rejects AMI frame-glue artifacts such as "PJSIP/54Response: Success".
+_RE_QUEUE_INTERFACE = re.compile(r'^(PJSIP|SIP|IAX2|Local)/[A-Za-z0-9_@./+-]+$')
+
+
+def _valid_queue_interface(interface: str) -> bool:
+    """True if *interface* is a plausible queue member channel (not a parse artifact)."""
+    if not interface or not isinstance(interface, str):
+        return False
+    iface = interface.strip()
+    if not iface:
+        return False
+    # Frame-glue / header bleed from a broken AMI split
+    if 'Response' in iface or 'Event' in iface or ' ' in iface or '\n' in iface or '\r' in iface:
+        return False
+    if ':' in iface:  # AMI key bleed ("PJSIP/54Response: Success")
+        return False
+    return bool(_RE_QUEUE_INTERFACE.match(iface))
 
 
 class ExtensionStatus(IntEnum):
@@ -2336,13 +2354,13 @@ class AMIExtensionsMonitor:
     def _ev_QueueMemberStatus(self, p, ts):
         """Handle QueueMemberStatus event - member status change."""
         queue = p.get('Queue', '')
-        member = p.get('Interface', '')
+        member = p.get('Interface', '') or p.get('Location', '')
         membername = p.get('MemberName', member)
         status_code = p.get('Status', '')
         status = _queue_member_status(status_code)
         paused = p.get('Paused', '0') == '1'
         
-        if queue and member:
+        if queue and member and _valid_queue_interface(member):
             member_key = f"{queue}:{member}"
             # Preserve dynamic flag if it exists
             is_dynamic = member_key in self.dynamic_members
@@ -2369,11 +2387,11 @@ class AMIExtensionsMonitor:
     def _ev_QueueMemberAdded(self, p, ts):
         """Handle QueueMemberAdded event."""
         queue = p.get('Queue', '')
-        member = p.get('Interface', '')
+        member = p.get('Interface', '') or p.get('Location', '')
         membername = p.get('MemberName', member)
         paused = p.get('Paused', '0') == '1'
         
-        if queue and member:
+        if queue and member and _valid_queue_interface(member):
             member_key = f"{queue}:{member}"
             # Mark as dynamic - this event is only fired when members are added via AMI
             self.dynamic_members.add(member_key)
@@ -2402,7 +2420,7 @@ class AMIExtensionsMonitor:
     def _ev_QueueMemberRemoved(self, p, ts):
         """Handle QueueMemberRemoved event."""
         queue = p.get('Queue', '')
-        member = p.get('Interface', '')
+        member = p.get('Interface', '') or p.get('Location', '')
         
         if queue and member:
             member_key = f"{queue}:{member}"
@@ -2725,7 +2743,8 @@ class AMIExtensionsMonitor:
             return {}
         
         queues_summary = {}
-        lines = resp.split('\r\n')
+        normalized = resp.replace('\r\n', '\n').replace('\r', '\n')
+        lines = normalized.split('\n')
         current_queue = None
         
         for line in lines:
@@ -2992,8 +3011,13 @@ class AMIExtensionsMonitor:
         # Get detailed queue status with members and entries for each queue
         for queue_name in summary.keys():
             resp = await self._send_action_with_events('QueueStatus', {'Queue': queue_name}, 'QueueStatusComplete')
+            seen_keys: set = set()
             if resp and 'Response: Success' in resp:
-                lines = resp.split('\r\n')
+                # Normalize line endings — mixed \n / \r\n otherwise glues the next
+                # AMI header onto a truncated Location/Interface value
+                # (e.g. "PJSIP/54" + "Response: Success").
+                normalized = resp.replace('\r\n', '\n').replace('\r', '\n')
+                lines = normalized.split('\n')
                 current_item = {}
                 current_event = None
                 
@@ -3006,7 +3030,9 @@ class AMIExtensionsMonitor:
                     if k == 'Event':
                         # Save previous item if complete
                         if current_event == 'QueueMember' and 'queue' in current_item and 'interface' in current_item:
-                            self._add_queue_member(current_item)
+                            key = self._add_queue_member(current_item)
+                            if key:
+                                seen_keys.add(key)
                         elif current_event == 'QueueEntry' and 'queue' in current_item and 'uniqueid' in current_item:
                             self._add_queue_entry(current_item)
                         
@@ -3021,10 +3047,12 @@ class AMIExtensionsMonitor:
                     if current_event == 'QueueMember':
                         if k == 'Queue':
                             current_item['queue'] = v
-                        elif k == 'Name':
+                        elif k in ('Name', 'MemberName'):
                             current_item['membername'] = v
-                        elif k == 'Location':
-                            current_item['interface'] = v
+                        elif k in ('Location', 'Interface'):
+                            # Prefer Interface when both are present (modern Asterisk).
+                            if k == 'Interface' or 'interface' not in current_item:
+                                current_item['interface'] = v
                         elif k == 'Status':
                             current_item['status'] = v
                         elif k == 'Paused':
@@ -3052,16 +3080,43 @@ class AMIExtensionsMonitor:
                 
                 # Handle last item
                 if current_event == 'QueueMember' and 'queue' in current_item and 'interface' in current_item:
-                    self._add_queue_member(current_item)
+                    key = self._add_queue_member(current_item)
+                    if key:
+                        seen_keys.add(key)
                 elif current_event == 'QueueEntry' and 'queue' in current_item and 'uniqueid' in current_item:
                     self._add_queue_entry(current_item)
+
+            # Drop stale / phantom members for this queue that were not in the
+            # fresh QueueStatus snapshot (sync used to only upsert).
+            prefix = f"{queue_name}:"
+            for mkey in [k for k in list(self.queue_members) if k.startswith(prefix) and k not in seen_keys]:
+                stale = self.queue_members.pop(mkey, None)
+                self.dynamic_members.discard(mkey)
+                iface = (stale or {}).get('interface') or (mkey.split(':', 1)[1] if ':' in mkey else '')
+                if queue_name in self.queues and iface:
+                    self.queues[queue_name].get('members', {}).pop(iface, None)
+                log.info("Pruned stale queue member %s", mkey)
+
+        # Final sweep: drop any remaining members with corrupt interfaces
+        for mkey, info in list(self.queue_members.items()):
+            iface = info.get('interface', '')
+            if not _valid_queue_interface(iface):
+                self.queue_members.pop(mkey, None)
+                self.dynamic_members.discard(mkey)
+                q = info.get('queue', '')
+                if q in self.queues:
+                    self.queues[q].get('members', {}).pop(iface, None)
+                log.info("Dropped invalid queue interface %r (%s)", iface, mkey)
         
         log.info(f"Synced {len(self.queues)} queues, {len(self.queue_members)} members, {len(self.queue_entries)} waiting callers")
     
     def _add_queue_member(self, item: dict):
-        """Helper to add a queue member from sync data."""
+        """Helper to add a queue member from sync data. Returns member_key or None if rejected."""
         q_name = item['queue']
-        interface = item['interface']
+        interface = (item.get('interface') or '').strip()
+        if not _valid_queue_interface(interface):
+            log.warning("Ignoring invalid queue member interface %r in queue %s", interface, q_name)
+            return None
         membername = item.get('membername', interface)
         status_raw = item.get('status', 'Unknown')
         # Convert numeric status code to human-readable string
@@ -3102,6 +3157,7 @@ class AMIExtensionsMonitor:
                 'paused': paused,
                 'dynamic': is_dynamic
             }
+        return member_key
     
     def _add_queue_entry(self, item: dict):
         """Helper to add a queue entry (waiting caller) from sync data."""
