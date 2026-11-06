@@ -43,6 +43,43 @@ def get_db_config(password,database):
     }
 
 
+# Cache of optional CDR columns (FreePBX adds `did`; plain Asterisk may not).
+_cdr_column_cache: Dict[str, bool] = {}
+
+
+def cdr_has_column(column: str) -> bool:
+    """Return True if asteriskcdrdb.cdr has *column* (cached after first lookup)."""
+    col = (column or '').strip().lower()
+    if not col:
+        return False
+    if col in _cdr_column_cache:
+        return _cdr_column_cache[col]
+    conn = None
+    try:
+        config = get_db_config(os.getenv('DB_PASSWORD', ''), os.getenv('DB_CDR', ''))
+        conn = mysql.connector.connect(**config)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT 1 FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cdr' AND COLUMN_NAME = %s "
+            "LIMIT 1",
+            (col,),
+        )
+        present = cursor.fetchone() is not None
+        cursor.close()
+        _cdr_column_cache[col] = present
+        if not present:
+            log.info("CDR column %r not present — related call-log fields will be empty", col)
+        return present
+    except Error as e:
+        log.warning("cdr_has_column(%s) failed: %s", col, e)
+        _cdr_column_cache[col] = False
+        return False
+    finally:
+        if conn is not None and conn.is_connected():
+            conn.close()
+
+
 
 def get_extensions_from_db():
     """Get list of extension numbers from the PBX database.
@@ -470,6 +507,9 @@ def get_call_log_from_db(limit: int = None, date: str = None,
                 sub_params.append(date_to)
         sub_where = ("WHERE " + " AND ".join(sub_conds)) if sub_conds else ""
 
+        # FreePBX CDR includes `did` (inbound dialed number). Plain Asterisk may not.
+        did_select = "first_leg.did AS did," if cdr_has_column('did') else "'' AS did,"
+
         # Build the base query: first leg (min sequence) + last leg (max sequence) per linkedid,
         # with call_app derived from dcontext (queue/ivr/direct) and leg count for call journey.
         query = """
@@ -477,6 +517,7 @@ def get_call_log_from_db(limit: int = None, date: str = None,
                 first_leg.calldate,
                 first_leg.src,
                 first_leg.dst          AS dst,
+                {did_select}
                 first_leg.dcontext     AS dcontext,
                 last_leg.dst           AS answered_by,
                 last_leg.channel      AS channel,
@@ -524,7 +565,7 @@ def get_call_log_from_db(limit: int = None, date: str = None,
                 {sub_where}
                 GROUP BY linkedid
             ) leg_count ON first_leg.linkedid = leg_count.linkedid
-        """.format(sub_where=sub_where)
+        """.format(sub_where=sub_where, did_select=did_select)
 
         # Build WHERE conditions (use first_leg for calldate/src, last_leg for dstchannel).
         # The three GROUP BY subqueries reference {sub_where} left-to-right, so their

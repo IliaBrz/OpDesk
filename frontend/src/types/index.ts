@@ -109,6 +109,8 @@ export interface CallLogRecord {
   calldate: string;
   src: string;
   dst: string;
+  /** Inbound dialed number (FreePBX CDR `did`), when available. */
+  did?: string | null;
   phone_number: string;
   customer_name: string | null;
   duration: number;
