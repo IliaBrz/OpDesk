@@ -512,6 +512,12 @@ def get_call_log_from_db(limit: int = None, date: str = None,
 
         # Build the base query: first leg (min sequence) + last leg (max sequence) per linkedid,
         # with call_app derived from dcontext (queue/ivr/direct) and leg count for call journey.
+        #
+        # disposition / billsec come from an across-legs outcome aggregate — NOT last_leg.
+        # FreePBX queue CDRs write one row per agent ring; unanswered Queue legs often have
+        # billsec == duration (inbound already answered for MOH), and the last row may be a
+        # trailing NO ANSWER after a real ANSWERED middle leg. Using last_leg.billsec as
+        # "answered" therefore both false-positives abandons and false-negatives answers.
         query = """
             SELECT
                 first_leg.calldate,
@@ -519,13 +525,13 @@ def get_call_log_from_db(limit: int = None, date: str = None,
                 first_leg.dst          AS dst,
                 {did_select}
                 first_leg.dcontext     AS dcontext,
-                last_leg.dst           AS answered_by,
+                COALESCE(ans_leg.dst, last_leg.dst) AS answered_by,
                 last_leg.channel      AS channel,
-                last_leg.dstchannel    AS dstchannel,
-                last_leg.lastapp,
+                COALESCE(ans_leg.dstchannel, last_leg.dstchannel) AS dstchannel,
+                COALESCE(ans_leg.lastapp, last_leg.lastapp) AS lastapp,
                 last_leg.duration,
-                last_leg.billsec,
-                last_leg.disposition,
+                outcome.billsec,
+                outcome.disposition,
                 first_leg.channel,
                 first_leg.recordingfile,
                 first_leg.cnam,
@@ -565,13 +571,45 @@ def get_call_log_from_db(limit: int = None, date: str = None,
                 {sub_where}
                 GROUP BY linkedid
             ) leg_count ON first_leg.linkedid = leg_count.linkedid
-        """.format(sub_where=sub_where, did_select=did_select)
+            JOIN (
+                SELECT
+                    linkedid,
+                    CASE
+                        WHEN SUM(disposition = 'ANSWERED') > 0 THEN 'ANSWERED'
+                        WHEN SUM(disposition = 'BUSY') > 0 THEN 'BUSY'
+                        WHEN SUM(disposition IN ('FAILED', 'CONGESTION')) > 0 THEN 'FAILED'
+                        WHEN SUM(disposition = 'NO ANSWER') > 0 THEN 'NO ANSWER'
+                        ELSE MAX(disposition)
+                    END AS disposition,
+                    COALESCE(MAX(CASE WHEN disposition = 'ANSWERED' THEN billsec END), 0)
+                        AS billsec
+                FROM cdr
+                {sub_where}
+                GROUP BY linkedid
+            ) outcome ON outcome.linkedid = first_leg.linkedid
+            LEFT JOIN (
+                SELECT c.*
+                FROM cdr c
+                JOIN (
+                    SELECT linkedid, MAX(sequence) AS ans_seq
+                    FROM cdr
+                    {sub_where}
+                      {ans_and} disposition = 'ANSWERED'
+                    GROUP BY linkedid
+                ) x ON c.linkedid = x.linkedid AND c.sequence = x.ans_seq
+            ) ans_leg ON ans_leg.linkedid = first_leg.linkedid
+        """.format(
+            sub_where=sub_where,
+            did_select=did_select,
+            # When sub_where is empty the ANSWERED filter is a bare WHERE; otherwise AND.
+            ans_and="AND" if sub_where else "WHERE",
+        )
 
         # Build WHERE conditions (use first_leg for calldate/src, last_leg for dstchannel).
-        # The three GROUP BY subqueries reference {sub_where} left-to-right, so their
+        # The five GROUP BY / leg subqueries reference {sub_where} left-to-right, so their
         # date params come first (once per subquery), then these outer params.
         conditions = []
-        params = list(sub_params) * 3
+        params = list(sub_params) * 5
 
         # Precise outer date bound. Compared against the bare column (no DATE()
         # wrapper) so an index on calldate is usable; range form is equivalent to

@@ -316,28 +316,58 @@ def crm_identity_from_cdr(linkedid: str) -> dict:
 
     # get_cdr_by_linkedid returns raw per-leg rows with no ordering, so collapse them
     # the SAME way the call history does: identity from the first leg (min sequence =
-    # origin), outcome from the last leg (max sequence = final). Without this a single
-    # arbitrary leg is used and multi-leg calls report the wrong party.
+    # origin); disposition/talk from any ANSWERED leg (FreePBX queue CDRs often end on
+    # a trailing NO ANSWER ring, and unanswered Queue legs still have billsec > 0
+    # because the inbound channel was answered for MOH).
     legs = sorted(rows, key=lambda r: (r.get('sequence') or 0))
     first, last = legs[0], legs[-1]
+    answered_legs = [
+        r for r in legs
+        if str(r.get('disposition', '')).upper() == 'ANSWERED'
+    ]
+    talk_leg = max(answered_legs, key=lambda r: int(r.get('billsec') or 0)) if answered_legs else None
+    if answered_legs:
+        disp = 'ANSWERED'
+        billsec = talk_leg.get('billsec')
+        dstchannel = talk_leg.get('dstchannel') or last.get('dstchannel')
+        lastapp = talk_leg.get('lastapp') or last.get('lastapp')
+    else:
+        # Prefer BUSY/FAILED over a bare trailing NO ANSWER when present.
+        disps = {str(r.get('disposition', '')).upper() for r in legs}
+        if 'BUSY' in disps:
+            disp = 'BUSY'
+        elif 'FAILED' in disps or 'CONGESTION' in disps:
+            disp = 'FAILED'
+        elif 'NO ANSWER' in disps:
+            disp = 'NO ANSWER'
+        else:
+            disp = str(last.get('disposition', '')).upper()
+        billsec = 0
+        dstchannel = last.get('dstchannel')
+        lastapp = last.get('lastapp')
     cdr = {
         'calldate': first.get('calldate'),
         'src': first.get('src'),
         'dst': first.get('dst'),
         'dcontext': first.get('dcontext'),
         'channel': first.get('channel'),
-        'dstchannel': last.get('dstchannel'),
-        'lastapp': last.get('lastapp'),
-        'disposition': last.get('disposition'),
-        'billsec': last.get('billsec'),
+        'dstchannel': dstchannel,
+        'lastapp': lastapp,
+        'disposition': disp,
+        'billsec': billsec,
         'duration': last.get('duration'),
     }
     direction = classify_cdr_direction(cdr)
     ext = convert_channel_to_extension(cdr.get('dstchannel'), cdr.get('channel'))
 
     dirmap = {'IN': 'inbound', 'OUT': 'outbound', 'INTERNAL': 'internal'}
-    disp = str(cdr.get('disposition', '')).upper()
-    outcome = map_call_outcome(disposition=disp, answered=bool(cdr.get('billsec')))
+    # Never treat billsec alone as answered — see collapse rules above.
+    is_queue = 'queue' in str(cdr.get('dcontext') or '').lower() or str(lastapp or '') == 'Queue'
+    outcome = map_call_outcome(
+        disposition=disp,
+        answered=(disp == 'ANSWERED'),
+        abandoned=(is_queue and disp == 'NO ANSWER'),
+    )
 
     def _hms(secs):
         try:
@@ -421,9 +451,17 @@ def call_log(limit=None, date=None, date_from=None, date_to=None, allowed_extens
         # Canonical outcome. Computed on read from the CDR disposition, never stored,
         # so the whole history re-renders under this vocabulary with no backfill.
         # `disposition` below stays the RAW CDR value — analytics keys off it.
+        #
+        # Do NOT pass answered=bool(billsec): FreePBX Queue NO ANSWER legs often have
+        # billsec == duration (inbound answered for MOH/announce), which falsely marked
+        # abandoned queue calls as ANSWERED in Call History.
         disposition = str(cdr.get('disposition', '')).upper()
-        status = map_call_outcome(disposition=disposition,
-                                  answered=bool(cdr.get('billsec')))
+        is_queue = str(cdr.get('app') or cdr.get('call_app') or '') == 'queue'
+        status = map_call_outcome(
+            disposition=disposition,
+            answered=(disposition == 'ANSWERED'),
+            abandoned=(is_queue and disposition == 'NO ANSWER'),
+        )
 
         # Create a new dict with only the fields you want
         did_raw = cdr.get('did')
