@@ -132,6 +132,8 @@
   "queues": {
     "title": "Очереди",
     "noQueues": "Очереди не настроены",
+    "showUnavailable": "Показать Unavailable",
+    "showUnavailableHint": "Участники со статусом Unavailable в очередях скрыты по умолчанию",
     "sync": "Синхронизация",
     "syncAll": "Синхронизировать все данные",
     "waiting": "{{count}} ожидают",

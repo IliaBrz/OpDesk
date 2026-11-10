@@ -128,6 +128,8 @@
   "queues": {
     "title": "قوائم الانتظار",
     "noQueues": "لا توجد قوائم انتظار مُهيّأة",
+    "showUnavailable": "إظهار Unavailable",
+    "showUnavailableHint": "أعضاء Unavailable في قوائم الانتظار مخفيون افتراضيًا",
     "sync": "مزامنة",
     "syncAll": "مزامنة جميع البيانات",
     "waiting": "{{count}} في الانتظار",

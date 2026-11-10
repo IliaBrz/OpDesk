@@ -184,6 +184,8 @@ export function QueuesPanel({ queues, members, entries, extensions, sendAction, 
   const [newMemberPaused, setNewMemberPaused] = useState(false);
   // Map of memberKey -> target paused state of the in-flight pause/unpause action.
   const [processingPause, setProcessingPause] = useState<Map<string, boolean>>(new Map());
+  // Unavailable members hidden by default; toggle reveals them in every queue card.
+  const [showUnavailable, setShowUnavailable] = useState(false);
 
   // When members update from the server, clear processing state only for members
   // that have reached their target paused state — leaves other in-flight actions intact.
@@ -273,16 +275,23 @@ export function QueuesPanel({ queues, members, entries, extensions, sendAction, 
     entriesByQueue[entry.queue].push(entry);
   });
 
-  // Group members by queue, sorted In Call → Ready → Not Ready → Unavailable
-  const membersByQueue: Record<string, QueueMember[]> = {};
+  // Group members by queue, sorted In Call → Ready → Not Ready → Unavailable.
+  // Keep the full set for Add Member exclusion; filter Unavailable only for display.
+  const allMembersByQueue: Record<string, QueueMember[]> = {};
   Object.values(members).forEach(member => {
-    if (!membersByQueue[member.queue]) {
-      membersByQueue[member.queue] = [];
+    if (!allMembersByQueue[member.queue]) {
+      allMembersByQueue[member.queue] = [];
     }
-    membersByQueue[member.queue].push(member);
+    allMembersByQueue[member.queue].push(member);
   });
-  Object.keys(membersByQueue).forEach((q) => {
-    membersByQueue[q] = sortQueueMembers(membersByQueue[q]);
+  Object.keys(allMembersByQueue).forEach((q) => {
+    allMembersByQueue[q] = sortQueueMembers(allMembersByQueue[q]);
+  });
+  const membersByQueue: Record<string, QueueMember[]> = {};
+  Object.entries(allMembersByQueue).forEach(([q, list]) => {
+    membersByQueue[q] = showUnavailable
+      ? list
+      : list.filter((m) => memberStatusClass(m) !== 'unavailable');
   });
 
   // Bare extension number for a member interface, e.g. "PJSIP/100" -> "100".
@@ -290,7 +299,7 @@ export function QueuesPanel({ queues, members, entries, extensions, sendAction, 
 
   // Selectable extensions for the Add Member picker, excluding those already in the queue.
   const extOptions = (queueExt: string) => {
-    const already = new Set((membersByQueue[queueExt] || []).map(m => memberExt(m.interface)));
+    const already = new Set((allMembersByQueue[queueExt] || []).map(m => memberExt(m.interface)));
     return Object.values(extensions || {})
       .filter(e => !already.has(e.extension))
       .map(e => ({ ext: e.extension, name: e.name, status: e.status }))
@@ -304,12 +313,31 @@ export function QueuesPanel({ queues, members, entries, extensions, sendAction, 
           <Users size={18} className="panel-title-icon" />
           {t('queues.title')} ({queueList.length})
         </h2>
-        {onSync && (
-          <button type="button" className="btn btn-panel-sync" onClick={onSync} title={t('queues.syncAll')}>
-            <RefreshCw size={14} />
-            {t('queues.sync')}
+        <div className="panel-header-actions">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={showUnavailable}
+            className={`queues-show-unavailable${showUnavailable ? ' on' : ''}`}
+            onClick={() => setShowUnavailable((v) => !v)}
+            title={t('queues.showUnavailableHint', {
+              defaultValue: 'Unavailable members in Queues hidden by default',
+            })}
+          >
+            <span className="queues-show-unavailable-track" aria-hidden="true">
+              <span className="queues-show-unavailable-knob" />
+            </span>
+            <span className="queues-show-unavailable-label">
+              {t('queues.showUnavailable', { defaultValue: 'Show Unavailable' })}
+            </span>
           </button>
-        )}
+          {onSync && (
+            <button type="button" className="btn btn-panel-sync" onClick={onSync} title={t('queues.syncAll')}>
+              <RefreshCw size={14} />
+              {t('queues.sync')}
+            </button>
+          )}
+        </div>
       </div>
       <div className="panel-content">
         {queueList.length === 0 ? (

@@ -132,6 +132,8 @@
   "queues": {
     "title": "Queues",
     "noQueues": "No queues configured",
+    "showUnavailable": "Show Unavailable",
+    "showUnavailableHint": "Unavailable members in Queues hidden by default",
     "sync": "Sync",
     "syncAll": "Sync all data",
     "waiting": "{{count}} waiting",
