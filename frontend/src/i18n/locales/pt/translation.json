@@ -129,6 +129,8 @@
   "queues": {
     "title": "Filas",
     "noQueues": "Nenhuma fila configurada",
+    "showUnavailable": "Mostrar Unavailable",
+    "showUnavailableHint": "Membros Unavailable nas filas ficam ocultos por padrão",
     "sync": "Sincronizar",
     "syncAll": "Sincronizar todos os dados",
     "waiting": "{{count}} em espera",

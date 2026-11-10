@@ -129,6 +129,8 @@
   "queues": {
     "title": "Colas",
     "noQueues": "No hay colas configuradas",
+    "showUnavailable": "Mostrar Unavailable",
+    "showUnavailableHint": "Los miembros Unavailable en las colas están ocultos por defecto",
     "sync": "Sincronizar",
     "syncAll": "Sincronizar todos los datos",
     "waiting": "{{count}} en espera",
