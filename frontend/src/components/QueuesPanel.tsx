@@ -318,7 +318,7 @@ export function QueuesPanel({ queues, members, entries, extensions, sendAction, 
             type="button"
             role="switch"
             aria-checked={showUnavailable}
-            className={`queues-show-unavailable${showUnavailable ? ' on' : ''}`}
+            className={`btn btn-panel-sync queues-show-unavailable${showUnavailable ? ' on' : ''}`}
             onClick={() => setShowUnavailable((v) => !v)}
             title={t('queues.showUnavailableHint', {
               defaultValue: 'Unavailable members in Queues hidden by default',
@@ -327,9 +327,7 @@ export function QueuesPanel({ queues, members, entries, extensions, sendAction, 
             <span className="queues-show-unavailable-track" aria-hidden="true">
               <span className="queues-show-unavailable-knob" />
             </span>
-            <span className="queues-show-unavailable-label">
-              {t('queues.showUnavailable', { defaultValue: 'Show Unavailable' })}
-            </span>
+            {t('queues.showUnavailable', { defaultValue: 'Show Unavailable' })}
           </button>
           {onSync && (
             <button type="button" className="btn btn-panel-sync" onClick={onSync} title={t('queues.syncAll')}>
