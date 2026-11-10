@@ -1646,39 +1646,11 @@ body::before {
   border-color: var(--border-accent);
 }
 
-/* Compact "Show Unavailable" switch in Queues panel header (left of Sync). */
-.queues-show-unavailable {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
-  background: var(--bg-tertiary);
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-.queues-show-unavailable:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-  border-color: var(--border-accent);
-}
-.queues-show-unavailable:focus-visible {
-  outline: 2px solid var(--accent-primary);
-  outline-offset: 2px;
-}
-.queues-show-unavailable.on {
-  color: var(--text-primary);
-  border-color: color-mix(in srgb, var(--status-unavailable) 45%, var(--border-subtle));
-  background: color-mix(in srgb, var(--status-unavailable-bg) 70%, var(--bg-tertiary));
-}
+/* Show Unavailable: same chrome as .btn-panel-sync; only the track reflects on/off. */
 .queues-show-unavailable-track {
   position: relative;
-  width: 32px;
-  height: 18px;
+  width: 28px;
+  height: 14px;
   border-radius: 999px;
   background: var(--bg-primary);
   border: 1px solid var(--border-subtle);
@@ -1686,26 +1658,22 @@ body::before {
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 .queues-show-unavailable.on .queues-show-unavailable-track {
-  background: color-mix(in srgb, var(--status-unavailable) 28%, var(--bg-primary));
-  border-color: color-mix(in srgb, var(--status-unavailable) 50%, var(--border-subtle));
+  background: color-mix(in srgb, var(--accent-primary) 28%, var(--bg-primary));
+  border-color: color-mix(in srgb, var(--accent-primary) 45%, var(--border-subtle));
 }
 .queues-show-unavailable-knob {
   position: absolute;
   top: 1px;
   inset-inline-start: 1px;
-  width: 14px;
-  height: 14px;
+  width: 10px;
+  height: 10px;
   border-radius: 50%;
   background: var(--text-muted);
   transition: inset-inline-start var(--transition-fast), background var(--transition-fast);
 }
 .queues-show-unavailable.on .queues-show-unavailable-knob {
   inset-inline-start: 15px;
-  background: var(--status-unavailable);
-}
-.queues-show-unavailable-label {
-  white-space: nowrap;
-  line-height: 1;
+  background: var(--accent-primary);
 }
 
 .panel-content {
