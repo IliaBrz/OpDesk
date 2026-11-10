@@ -378,22 +378,81 @@ def compute_agent_adherence(date_from: str, date_to: str, allowed_agents=None) -
 # Core CDR query — queue calls with first_leg/last_leg join
 # ---------------------------------------------------------------------------
 
-# first_leg = queue entry leg (lastapp=Queue)
-# last_leg  = agent answering leg (or same as first_leg if single-leg)
+# first_leg = earliest CDR row for a linkedid (queue entry / first ring attempt)
+# last_leg  = latest CDR row (may be talk, transfer Dial, or a trailing ring)
 #
-# wait_secs = first_leg.duration - last_leg.billsec
-#             (total time in system minus talk time = queue wait)
-# For abandoned calls last_leg.billsec = 0, so wait_secs = first_leg.duration
+# FreePBX writes one Queue CDR per agent ring attempt. first_leg.duration is
+# therefore only the first ring attempt — NOT total time in system — and
+# last_leg.billsec is often talk on a different leg. The classic
+# `duration - billsec` wait formula goes negative and must not be used.
+#
+# wait_secs (queue calls):
+#   answered  = seconds from first_leg.calldate to first ANSWERED leg calldate
+#               + ring time of the answering round (shortest NO ANSWER sibling
+#               at that calldate; falls back to first_leg.duration for
+#               same-second single-agent pickup)
+#   abandoned = seconds from first_leg.calldate to end of last_leg
 #
 # agent_ext is extracted from last_leg.dstchannel using the same
 # SUBSTRING_INDEX expression already in db_manager.py.
 #
 # Inner subqueries include date filtering (with 1-day buffer) to avoid
 # full-table scans on large CDR tables.
-# Expects 6 base params: [date_from, date_to] × 3
+# Expects 10 base params: [date_from, date_to] × 5
+#   (first_leg, last_leg, ans aggregate, ans join, outer filter)
+
+_CALLER_EXT_EXPR = "SUBSTRING_INDEX(SUBSTRING_INDEX(first_leg.channel, '-', 1), '/', -1)"
+
+# Shared join: first ANSWERED calldate per linkedid + ring secs of that round.
+_ANSWER_JOIN_SQL = """
+    LEFT JOIN (
+        SELECT
+            q.linkedid,
+            q.first_answered_at,
+            MIN(CASE
+                  WHEN c.disposition = 'NO ANSWER'
+                   AND c.calldate = q.first_answered_at
+                  THEN c.duration
+                END) AS answer_ring_secs
+        FROM (
+            SELECT
+                linkedid,
+                MIN(CASE WHEN disposition = 'ANSWERED' THEN calldate END)
+                    AS first_answered_at
+            FROM cdr
+            WHERE calldate >= %s
+              AND calldate < DATE_ADD(%s, INTERVAL 2 DAY)
+            GROUP BY linkedid
+        ) q
+        JOIN cdr c ON c.linkedid = q.linkedid
+          AND c.calldate >= %s
+          AND c.calldate < DATE_ADD(%s, INTERVAL 2 DAY)
+        GROUP BY q.linkedid, q.first_answered_at
+    ) ans ON ans.linkedid = first_leg.linkedid
+"""
+
+# Queue wait; never negative. See module comment above.
+_QUEUE_WAIT_SECS_SQL = """
+        GREATEST(0,
+            CASE
+                WHEN ans.first_answered_at IS NOT NULL THEN
+                    TIMESTAMPDIFF(SECOND, first_leg.calldate, ans.first_answered_at)
+                    + COALESCE(
+                        ans.answer_ring_secs,
+                        IF(ans.first_answered_at <=> first_leg.calldate,
+                           first_leg.duration, 0)
+                      )
+                ELSE
+                    TIMESTAMPDIFF(SECOND, first_leg.calldate,
+                        DATE_ADD(last_leg.calldate,
+                                 INTERVAL IFNULL(last_leg.duration, 0) SECOND))
+            END
+        )
+"""
+
 
 def _queue_cdr_sql(extra_sql=""):
-    """Build the queue CDR SQL. Caller must supply 6 base date params + extra_params."""
+    """Build the queue CDR SQL. Caller must supply 10 base date params + extra_params."""
     return f"""
     SELECT
         first_leg.calldate,
@@ -402,11 +461,7 @@ def _queue_cdr_sql(extra_sql=""):
         first_leg.duration              AS total_dur,
         last_leg.billsec                AS billsec,
         last_leg.disposition            AS disposition,
-        CASE
-            WHEN last_leg.billsec > 0
-            THEN first_leg.duration - last_leg.billsec
-            ELSE first_leg.duration
-        END                             AS wait_secs,
+        {_QUEUE_WAIT_SECS_SQL}          AS wait_secs,
         {_AGENT_EXT_EXPR}              AS agent_ext,
         first_leg.linkedid
     FROM
@@ -432,6 +487,7 @@ def _queue_cdr_sql(extra_sql=""):
                 GROUP BY linkedid
             ) x ON c.linkedid = x.linkedid AND c.sequence = x.max_seq
         ) last_leg ON first_leg.linkedid = last_leg.linkedid
+    {_ANSWER_JOIN_SQL}
     WHERE
         first_leg.lastapp = 'Queue'
         AND first_leg.calldate >= %s
@@ -440,9 +496,14 @@ def _queue_cdr_sql(extra_sql=""):
     """
 
 
+def _cdr_date_params(date_from: str, date_to: str, rounds: int = 5) -> list:
+    """Repeat [date_from, date_to] for each date-bounded subquery in CDR SQL."""
+    return [date_from, date_to] * rounds
+
+
 def _run_queue_cdr(date_from: str, date_to: str, extra_sql: str = "", extra_params: list = None):
     """Execute the queue CDR base query and return rows."""
-    params = [date_from, date_to, date_from, date_to, date_from, date_to] + (extra_params or [])
+    params = _cdr_date_params(date_from, date_to, 5) + (extra_params or [])
     try:
         with _cdr_db() as cursor:
             cursor.execute(_queue_cdr_sql(extra_sql), params)
@@ -458,13 +519,10 @@ def _run_queue_cdr(date_from: str, date_to: str, extra_sql: str = "", extra_para
 # All-call CDR query — includes queue, outbound, and internal calls
 # ---------------------------------------------------------------------------
 
-_CALLER_EXT_EXPR = "SUBSTRING_INDEX(SUBSTRING_INDEX(first_leg.channel, '-', 1), '/', -1)"
-
-
 def _all_cdr_sql(extra_sql=""):
     """Build CDR SQL for ALL calls (queue + outbound + internal).
     Includes extra fields (lastapp, dcontext, channel, dstchannel) for direction
-    classification in Python.  Caller must supply 6 base date params + extra_params."""
+    classification in Python.  Caller must supply 10 base date params + extra_params."""
     return f"""
     SELECT
         first_leg.calldate,
@@ -474,10 +532,7 @@ def _all_cdr_sql(extra_sql=""):
         last_leg.billsec                AS billsec,
         last_leg.disposition            AS disposition,
         CASE
-            WHEN first_leg.lastapp = 'Queue' AND last_leg.billsec > 0
-            THEN first_leg.duration - last_leg.billsec
-            WHEN first_leg.lastapp = 'Queue'
-            THEN first_leg.duration
+            WHEN first_leg.lastapp = 'Queue' THEN {_QUEUE_WAIT_SECS_SQL}
             ELSE 0
         END                             AS wait_secs,
         {_AGENT_EXT_EXPR}              AS agent_ext,
@@ -510,6 +565,7 @@ def _all_cdr_sql(extra_sql=""):
                 GROUP BY linkedid
             ) x ON c.linkedid = x.linkedid AND c.sequence = x.max_seq
         ) last_leg ON first_leg.linkedid = last_leg.linkedid
+    {_ANSWER_JOIN_SQL}
     WHERE
         first_leg.calldate >= %s
         AND first_leg.calldate < DATE_ADD(%s, INTERVAL 1 DAY)
@@ -519,7 +575,7 @@ def _all_cdr_sql(extra_sql=""):
 
 def _run_all_cdr(date_from: str, date_to: str, extra_sql: str = "", extra_params: list = None):
     """Execute the all-call CDR query and return rows."""
-    params = [date_from, date_to, date_from, date_to, date_from, date_to] + (extra_params or [])
+    params = _cdr_date_params(date_from, date_to, 5) + (extra_params or [])
     try:
         with _cdr_db() as cursor:
             cursor.execute(_all_cdr_sql(extra_sql), params)
@@ -624,7 +680,7 @@ def _compute_kpis_from_rows(rows, thresholds: dict, default_secs: int, short_aba
     for r in rows:
         total += 1
         disp = str(r.get('disposition', '')).upper()
-        wait = int(r.get('wait_secs') or 0)
+        wait = max(0, int(r.get('wait_secs') or 0))
         bsec = int(r.get('billsec') or 0)
         q = str(r.get('queue_ext', ''))
         threshold = _sla_threshold_for(q, thresholds, default_secs)
@@ -1539,13 +1595,12 @@ def refresh_hourly_bucket(
 
     try:
         with _cdr_db() as cursor:
-            cursor.execute("""
+            # Hour-bounded variant of _queue_cdr_sql (exclusive end = next hour).
+            cursor.execute(f"""
                 SELECT
                     first_leg.dst            AS queue_ext,
                     last_leg.disposition,
-                    CASE WHEN last_leg.billsec>0
-                         THEN first_leg.duration - last_leg.billsec
-                         ELSE first_leg.duration END AS wait_secs,
+                    {_QUEUE_WAIT_SECS_SQL}    AS wait_secs,
                     last_leg.billsec
                 FROM
                     (SELECT c.* FROM cdr c
@@ -1564,10 +1619,34 @@ def refresh_hourly_bucket(
                         GROUP BY linkedid
                       ) x ON c.linkedid=x.linkedid AND c.sequence=x.ms
                      ) last_leg ON first_leg.linkedid=last_leg.linkedid
+                LEFT JOIN (
+                    SELECT
+                        q.linkedid,
+                        q.first_answered_at,
+                        MIN(CASE
+                              WHEN c.disposition = 'NO ANSWER'
+                               AND c.calldate = q.first_answered_at
+                              THEN c.duration
+                            END) AS answer_ring_secs
+                    FROM (
+                        SELECT
+                            linkedid,
+                            MIN(CASE WHEN disposition = 'ANSWERED' THEN calldate END)
+                                AS first_answered_at
+                        FROM cdr
+                        WHERE calldate >= %s AND calldate < %s
+                        GROUP BY linkedid
+                    ) q
+                    JOIN cdr c ON c.linkedid = q.linkedid
+                      AND c.calldate >= %s AND c.calldate < %s
+                    GROUP BY q.linkedid, q.first_answered_at
+                ) ans ON ans.linkedid = first_leg.linkedid
                 WHERE first_leg.lastapp='Queue'
                   AND first_leg.calldate >= %s
                   AND first_leg.calldate < %s
             """, [hour_str, next_hour_str,
+                  hour_str, next_hour_str,
+                  hour_str, next_hour_str,
                   hour_str, next_hour_str,
                   hour_str, next_hour_str])
             rows = cursor.fetchall()
